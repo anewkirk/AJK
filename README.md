@@ -1,0 +1,4 @@
+AJK kernel for the Samsung SGH-I777
+
+This kernel began life as a fork of the Dorimanx kernel for the GT-I9100 back in November 2012 
+and has grown into a mature stable kernel in its own right.
