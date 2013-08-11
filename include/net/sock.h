@@ -45,7 +45,6 @@
 #include <linux/list_nulls.h>
 #include <linux/timer.h>
 #include <linux/cache.h>
-#include <linux/module.h>
 #include <linux/lockdep.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>	/* struct sk_buff */
@@ -55,10 +54,13 @@
 #include <linux/uaccess.h>
 #include <linux/memcontrol.h>
 #include <linux/static_key.h>
+#include <linux/aio.h>
+#include <linux/sched.h>
 
 #include <linux/filter.h>
 #include <linux/rculist_nulls.h>
 #include <linux/poll.h>
+#include <linux/aio.h>
 
 #include <linux/atomic.h>
 #include <net/dst.h>
@@ -93,8 +95,8 @@ void mem_cgroup_sockets_destroy(struct cgroup *cgrp)
 					printk(KERN_DEBUG msg); } while (0)
 #else
 /* Validate arguments and do nothing */
-static inline void __attribute__ ((format (printf, 2, 3)))
-SOCK_DEBUG(struct sock *sk, const char *msg, ...)
+static inline __printf(2, 3)
+void SOCK_DEBUG(struct sock *sk, const char *msg, ...)
 {
 }
 #endif
@@ -537,24 +539,23 @@ static __inline__ void sk_add_bind_node(struct sock *sk,
 	hlist_add_head(&sk->sk_bind_node, list);
 }
 
-#define sk_for_each(__sk, node, list) \
-	hlist_for_each_entry(__sk, node, list, sk_node)
-#define sk_for_each_rcu(__sk, node, list) \
-	hlist_for_each_entry_rcu(__sk, node, list, sk_node)
+#define sk_for_each(__sk, list) \
+	hlist_for_each_entry(__sk, list, sk_node)
+#define sk_for_each_rcu(__sk, list) \
+	hlist_for_each_entry_rcu(__sk, list, sk_node)
 #define sk_nulls_for_each(__sk, node, list) \
 	hlist_nulls_for_each_entry(__sk, node, list, sk_nulls_node)
 #define sk_nulls_for_each_rcu(__sk, node, list) \
 	hlist_nulls_for_each_entry_rcu(__sk, node, list, sk_nulls_node)
-#define sk_for_each_from(__sk, node) \
-	if (__sk && ({ node = &(__sk)->sk_node; 1; })) \
-		hlist_for_each_entry_from(__sk, node, sk_node)
+#define sk_for_each_from(__sk) \
+	hlist_for_each_entry_from(__sk, sk_node)
 #define sk_nulls_for_each_from(__sk, node) \
 	if (__sk && ({ node = &(__sk)->sk_nulls_node; 1; })) \
 		hlist_nulls_for_each_entry_from(__sk, node, sk_nulls_node)
-#define sk_for_each_safe(__sk, node, tmp, list) \
-	hlist_for_each_entry_safe(__sk, node, tmp, list, sk_node)
-#define sk_for_each_bound(__sk, node, list) \
-	hlist_for_each_entry(__sk, node, list, sk_bind_node)
+#define sk_for_each_safe(__sk, tmp, list) \
+	hlist_for_each_entry_safe(__sk, tmp, list, sk_node)
+#define sk_for_each_bound(__sk, list) \
+	hlist_for_each_entry(__sk, list, sk_bind_node)
 
 /* Sock flags */
 enum sock_flags {
@@ -738,6 +739,19 @@ struct request_sock_ops;
 struct timewait_sock_ops;
 struct inet_hashinfo;
 struct raw_hashinfo;
+struct module;
+
+/*
+ * caches using SLAB_DESTROY_BY_RCU should let .next pointer from nulls nodes
+ * un-modified. Special care is taken when initializing object to zero.
+ */
+static inline void sk_prot_clear_nulls(struct sock *sk, int size)
+{
+	if (offsetof(struct sock, sk_node.next) != 0)
+		memset(sk, 0, offsetof(struct sock, sk_node.next));
+	memset(&sk->sk_node.pprev, 0,
+	       size - offsetof(struct sock, sk_node.pprev));
+}
 
 /* Networking protocol blocks we attach to sockets.
  * socket layer -> transport layer interface
@@ -1159,14 +1173,6 @@ extern void *sock_kmalloc(struct sock *sk, int size,
 			  gfp_t priority);
 extern void sock_kfree_s(struct sock *sk, void *mem, int size);
 extern void sk_send_sigurg(struct sock *sk);
-
-#ifdef CONFIG_CGROUPS
-extern void sock_update_classid(struct sock *sk);
-#else
-static inline void sock_update_classid(struct sock *sk)
-{
-}
-#endif
 
 /*
  * Functions to fill in entries in struct proto_ops when a protocol
@@ -1602,7 +1608,7 @@ static inline bool wq_has_sleeper(struct socket_wq *wq)
 static inline void sock_poll_wait(struct file *filp,
 		wait_queue_head_t *wait_address, poll_table *p)
 {
-	if (p && wait_address) {
+	if (!poll_does_not_wait(p) && wait_address) {
 		poll_wait(filp, wait_address, p);
 		/*
 		 * We need to be sure we are in sync with the

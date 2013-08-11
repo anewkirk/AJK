@@ -18,6 +18,7 @@
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/hash.h>
+#include <linux/tick.h>
 #include <linux/sysfs.h>
 #include <linux/dcache.h>
 #include <linux/percpu.h>
@@ -25,6 +26,7 @@
 #include <linux/reboot.h>
 #include <linux/vmstat.h>
 #include <linux/device.h>
+#include <linux/export.h>
 #include <linux/vmalloc.h>
 #include <linux/hardirq.h>
 #include <linux/rculist.h>
@@ -35,6 +37,8 @@
 #include <linux/perf_event.h>
 #include <linux/ftrace_event.h>
 #include <linux/hw_breakpoint.h>
+#include <linux/mm_types.h>
+#include <linux/cgroup.h>
 
 #include "internal.h"
 
@@ -382,9 +386,10 @@ void perf_cgroup_switch(struct task_struct *task, int mode)
 
 			if (mode & PERF_CGROUP_SWIN) {
 				WARN_ON_ONCE(cpuctx->cgrp);
-				/* set cgrp before ctxsw in to
-				 * allow event_filter_match() to not
-				 * have to pass task around
+				/*
+				 * set cgrp before ctxsw in to allow
+				 * event_filter_match() to not have to pass
+				 * task around
 				 */
 				cpuctx->cgrp = perf_cgroup_from_task(task);
 				cpu_ctx_sched_in(cpuctx, EVENT_ALL, task);
@@ -455,14 +460,13 @@ static inline int perf_cgroup_connect(int fd, struct perf_event *event,
 {
 	struct perf_cgroup *cgrp;
 	struct cgroup_subsys_state *css;
-	struct file *file;
-	int ret = 0, fput_needed;
+	struct fd f = fdget(fd);
+	int ret = 0;
 
-	file = fget_light(fd, &fput_needed);
-	if (!file)
+	if (!f.file)
 		return -EBADF;
 
-	css = cgroup_css_from_dir(file, perf_subsys_id);
+	css = cgroup_css_from_dir(f.file, perf_subsys_id);
 	if (IS_ERR(css)) {
 		ret = PTR_ERR(css);
 		goto out;
@@ -484,7 +488,7 @@ static inline int perf_cgroup_connect(int fd, struct perf_event *event,
 		ret = -EINVAL;
 	}
 out:
-	fput_light(file, fput_needed);
+	fdput(f);
 	return ret;
 }
 
@@ -636,8 +640,12 @@ static void perf_pmu_rotate_start(struct pmu *pmu)
 
 	WARN_ON(!irqs_disabled());
 
-	if (list_empty(&cpuctx->rotation_list))
+	if (list_empty(&cpuctx->rotation_list)) {
+		int was_empty = list_empty(head);
 		list_add(&cpuctx->rotation_list, head);
+		if (was_empty)
+			tick_nohz_full_kick();
+	}
 }
 
 static void get_ctx(struct perf_event_context *ctx)
@@ -2428,6 +2436,16 @@ done:
 	perf_ctx_unlock(cpuctx, cpuctx->task_ctx);
 }
 
+#ifdef CONFIG_NO_HZ_FULL
+bool perf_event_can_stop_tick(void)
+{
+	if (list_empty(&__get_cpu_var(rotation_list)))
+		return true;
+	else
+		return false;
+}
+#endif
+
 void perf_event_task_tick(void)
 {
 	struct list_head *head = &__get_cpu_var(rotation_list);
@@ -3293,21 +3311,18 @@ unlock:
 
 static const struct file_operations perf_fops;
 
-static struct file *perf_fget_light(int fd, int *fput_needed)
+static inline int perf_fget_light(int fd, struct fd *p)
 {
-	struct file *file;
+	struct fd f = fdget(fd);
+	if (!f.file)
+		return -EBADF;
 
-	file = fget_light(fd, fput_needed);
-	if (!file)
-		return ERR_PTR(-EBADF);
-
-	if (file->f_op != &perf_fops) {
-		fput_light(file, *fput_needed);
-		*fput_needed = 0;
-		return ERR_PTR(-EBADF);
+	if (f.file->f_op != &perf_fops) {
+		fdput(f);
+		return -EBADF;
 	}
-
-	return file;
+	*p = f;
+	return 0;
 }
 
 static int perf_event_set_output(struct perf_event *event,
@@ -3339,22 +3354,19 @@ static long perf_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case PERF_EVENT_IOC_SET_OUTPUT:
 	{
-		struct file *output_file = NULL;
-		struct perf_event *output_event = NULL;
-		int fput_needed = 0;
 		int ret;
-
 		if (arg != -1) {
-			output_file = perf_fget_light(arg, &fput_needed);
-			if (IS_ERR(output_file))
-				return PTR_ERR(output_file);
-			output_event = output_file->private_data;
+			struct perf_event *output_event;
+			struct fd output;
+			ret = perf_fget_light(arg, &output);
+			if (ret)
+				return ret;
+			output_event = output.file->private_data;
+			ret = perf_event_set_output(event, output_event);
+			fdput(output);
+		} else {
+			ret = perf_event_set_output(event, NULL);
 		}
-
-		ret = perf_event_set_output(event, output_event);
-		if (output_event)
-			fput_light(output_file, fput_needed);
-
 		return ret;
 	}
 
@@ -3560,7 +3572,7 @@ static void perf_mmap_close(struct vm_area_struct *vma)
 		struct ring_buffer *rb = event->rb;
 
 		atomic_long_sub((size >> PAGE_SHIFT) + 1, &user->locked_vm);
-		vma->vm_mm->locked_vm -= event->mmap_locked;
+		vma->vm_mm->pinned_vm -= event->mmap_locked;
 		rcu_assign_pointer(event->rb, NULL);
 		mutex_unlock(&event->mmap_mutex);
 
@@ -3641,7 +3653,7 @@ static int perf_mmap(struct file *file, struct vm_area_struct *vma)
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
 	lock_limit >>= PAGE_SHIFT;
-	locked = vma->vm_mm->locked_vm + extra;
+	locked = vma->vm_mm->pinned_vm + extra;
 
 	if ((locked > lock_limit) && perf_paranoid_tracepoint_raw() &&
 		!capable(CAP_IPC_LOCK)) {
@@ -3667,14 +3679,14 @@ static int perf_mmap(struct file *file, struct vm_area_struct *vma)
 	atomic_long_add(user_extra, &user->locked_vm);
 	event->mmap_locked = extra;
 	event->mmap_user = get_current_user();
-	vma->vm_mm->locked_vm += event->mmap_locked;
+	vma->vm_mm->pinned_vm += event->mmap_locked;
 
 unlock:
 	if (!ret)
 		atomic_inc(&event->mmap_count);
 	mutex_unlock(&event->mmap_mutex);
 
-	vma->vm_flags |= VM_RESERVED;
+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
 	vma->vm_ops = &perf_mmap_vmops;
 
 	return ret;
@@ -4887,7 +4899,6 @@ static void do_perf_sw_event(enum perf_type_id type, u32 event_id,
 {
 	struct swevent_htable *swhash = &__get_cpu_var(swevent_htable);
 	struct perf_event *event;
-	struct hlist_node *node;
 	struct hlist_head *head;
 
 	rcu_read_lock();
@@ -4895,7 +4906,7 @@ static void do_perf_sw_event(enum perf_type_id type, u32 event_id,
 	if (!head)
 		goto end;
 
-	hlist_for_each_entry_rcu(event, node, head, hlist_entry) {
+	hlist_for_each_entry_rcu(event, head, hlist_entry) {
 		if (perf_swevent_match(event, type, event_id, data, regs))
 			perf_swevent_event(event, nr, data, regs);
 	}
@@ -5089,7 +5100,7 @@ static void sw_perf_event_destroy(struct perf_event *event)
 
 static int perf_swevent_init(struct perf_event *event)
 {
-	int event_id = event->attr.config;
+	u64 event_id = event->attr.config;
 
 	if (event->attr.type != PERF_TYPE_SOFTWARE)
 		return -ENOENT;
@@ -5166,7 +5177,6 @@ void perf_tp_event(u64 addr, u64 count, void *record, int entry_size,
 {
 	struct perf_sample_data data;
 	struct perf_event *event;
-	struct hlist_node *node;
 
 	struct perf_raw_record raw = {
 		.size = entry_size,
@@ -5176,7 +5186,7 @@ void perf_tp_event(u64 addr, u64 count, void *record, int entry_size,
 	perf_sample_data_init(&data, addr);
 	data.raw = &raw;
 
-	hlist_for_each_entry_rcu(event, node, head, hlist_entry) {
+	hlist_for_each_entry_rcu(event, head, hlist_entry) {
 		if (perf_tp_event_match(event, &data, regs))
 			perf_swevent_event(event, count, &data, regs);
 	}
@@ -6071,12 +6081,11 @@ SYSCALL_DEFINE5(perf_event_open,
 	struct perf_event_attr attr;
 	struct perf_event_context *ctx;
 	struct file *event_file = NULL;
-	struct file *group_file = NULL;
+	struct fd group = {NULL, 0};
 	struct task_struct *task = NULL;
 	struct pmu *pmu;
 	int event_fd;
 	int move_group = 0;
-	int fput_needed = 0;
 	int err;
 
 	/* for future expandability... */
@@ -6111,12 +6120,10 @@ SYSCALL_DEFINE5(perf_event_open,
 		return event_fd;
 
 	if (group_fd != -1) {
-		group_file = perf_fget_light(group_fd, &fput_needed);
-		if (IS_ERR(group_file)) {
-			err = PTR_ERR(group_file);
+		err = perf_fget_light(group_fd, &group);
+		if (err)
 			goto err_fd;
-		}
-		group_leader = group_file->private_data;
+		group_leader = group.file->private_data;
 		if (flags & PERF_FLAG_FD_OUTPUT)
 			output_event = group_leader;
 		if (flags & PERF_FLAG_FD_NO_GROUP)
@@ -6130,6 +6137,8 @@ SYSCALL_DEFINE5(perf_event_open,
 			goto err_group_fd;
 		}
 	}
+
+	get_online_cpus();
 
 	event = perf_event_alloc(&attr, cpu, task, group_leader, NULL,
 				 NULL, NULL);
@@ -6277,6 +6286,8 @@ SYSCALL_DEFINE5(perf_event_open,
 	perf_unpin_context(ctx);
 	mutex_unlock(&ctx->mutex);
 
+	put_online_cpus();
+
 	event->owner = current;
 
 	mutex_lock(&current->perf_event_mutex);
@@ -6295,7 +6306,7 @@ SYSCALL_DEFINE5(perf_event_open,
 	 * of the group leader will find the pointer to itself in
 	 * perf_group_detach().
 	 */
-	fput_light(group_file, fput_needed);
+	fdput(group);
 	fd_install(event_fd, event_file);
 	return event_fd;
 
@@ -6305,10 +6316,11 @@ err_context:
 err_alloc:
 	free_event(event);
 err_task:
+	put_online_cpus();
 	if (task)
 		put_task_struct(task);
 err_group_fd:
-	fput_light(group_file, fput_needed);
+	fdput(group);
 err_fd:
 	put_unused_fd(event_fd);
 	return err;

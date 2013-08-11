@@ -49,14 +49,13 @@ void ocfs2_dentry_attach_gen(struct dentry *dentry)
 }
 
 
-static int ocfs2_dentry_revalidate(struct dentry *dentry,
-				   struct nameidata *nd)
+static int ocfs2_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	struct inode *inode;
 	int ret = 0;    /* if all else fails, just return false */
 	struct ocfs2_super *osb;
 
-	if (nd && nd->flags & LOOKUP_RCU)
+	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
 	inode = dentry->d_inode;
@@ -170,6 +169,7 @@ struct dentry *ocfs2_find_local_alias(struct inode *inode,
 				      u64 parent_blkno,
 				      int skip_unhashed)
 {
+<<<<<<< HEAD
 	struct list_head *p;
 	struct dentry *dentry = NULL;
 
@@ -177,6 +177,12 @@ struct dentry *ocfs2_find_local_alias(struct inode *inode,
 	list_for_each(p, &inode->i_dentry) {
 		dentry = list_entry(p, struct dentry, d_alias);
 
+=======
+	struct dentry *dentry;
+
+	spin_lock(&inode->i_lock);
+	hlist_for_each_entry(dentry, &inode->i_dentry, d_alias) {
+>>>>>>> b67bfe0... hlist: drop the node parameter from iterators
 		spin_lock(&dentry->d_lock);
 		if (ocfs2_match_dentry(dentry, parent_blkno, skip_unhashed)) {
 			trace_ocfs2_find_local_alias(dentry->d_name.len,

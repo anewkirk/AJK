@@ -52,6 +52,10 @@ static int amba_uevent(struct device *dev, struct kobj_uevent_env *env)
 	int retval = 0;
 
 	retval = add_uevent_var(env, "AMBA_ID=%08x", pcdev->periphid);
+	if (retval)
+		return retval;
+
+	retval = add_uevent_var(env, "MODALIAS=amba:d%08X", pcdev->periphid);
 	return retval;
 }
 #else
@@ -383,9 +387,9 @@ static const struct dev_pm_ops amba_pm = {
 	.poweroff_noirq	= amba_pm_poweroff_noirq,
 	.restore_noirq	= amba_pm_restore_noirq,
 	SET_RUNTIME_PM_OPS(
-		pm_generic_runtime_suspend,
-		pm_generic_runtime_resume,
-		pm_generic_runtime_idle
+		amba_pm_runtime_suspend,
+		amba_pm_runtime_resume,
+		NULL
 	)
 };
 

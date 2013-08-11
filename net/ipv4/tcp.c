@@ -3055,7 +3055,11 @@ int tcp_md5_hash_skb_data(struct tcp_md5sig_pool *hp,
 
 	for (i = 0; i < shi->nr_frags; ++i) {
 		const struct skb_frag_struct *f = &shi->frags[i];
-		sg_set_page(&sg, f->page, f->size, f->page_offset);
+		unsigned int offset = f->page_offset;
+		struct page *page = f->page + (offset >> PAGE_SHIFT);
+
+		sg_set_page(&sg, page, f->size,
+			    offset_in_page(offset));
 		if (crypto_hash_update(desc, &sg, f->size))
 			return 1;
 	}
@@ -3241,7 +3245,8 @@ void __init tcp_init(void)
 {
 	struct sk_buff *skb = NULL;
 	unsigned long limit;
-	int i, max_rshare, max_wshare, cnt;
+	int max_rshare, max_wshare, cnt;
+	unsigned int i;
 	unsigned long jiffy = jiffies;
 
 	BUILD_BUG_ON(sizeof(struct tcp_skb_cb) > sizeof(skb->cb));
@@ -3286,7 +3291,7 @@ void __init tcp_init(void)
 					NULL,
 					0,
 					64 * 1024);
-	tcp_hashinfo.bhash_size = 1 << tcp_hashinfo.bhash_size;
+	tcp_hashinfo.bhash_size = 1U << tcp_hashinfo.bhash_size;
 	for (i = 0; i < tcp_hashinfo.bhash_size; i++) {
 		spin_lock_init(&tcp_hashinfo.bhash[i].lock);
 		INIT_HLIST_HEAD(&tcp_hashinfo.bhash[i].chain);

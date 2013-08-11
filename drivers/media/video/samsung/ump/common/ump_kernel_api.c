@@ -1,9 +1,9 @@
 /*
- * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
- *
+ * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
+ * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
- *
+ * 
  * A copy of the licence is included with the program, and can also be obtained from Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
@@ -14,10 +14,6 @@
 #include "ump_uk_types.h"
 #include "ump_kernel_interface.h"
 #include "ump_kernel_common.h"
-
-#ifdef CONFIG_DMA_SHARED_BUFFER
-#include <linux/dma-buf.h>
-#endif
 
 
 
@@ -194,32 +190,7 @@ UMP_KERNEL_API_EXPORT void ump_dd_reference_release(ump_dd_handle memh)
 		ump_descriptor_mapping_free(device.secure_id_map, (int)mem->secure_id);
 
 		_mali_osk_lock_signal(device.secure_id_map_lock, _MALI_OSK_LOCKMODE_RW);
-
-#ifdef CONFIG_DMA_SHARED_BUFFER
-		/*
-		 * when ump descriptor imported to dmabuf is released,
-		 * physical memory region to the ump descriptor should be
-		 * released only through dma_buf_put().
-		 * if dma_buf_put() is called then file's refcount to
-		 * the dmabuf becomes 0 and release func of exporter will be
-		 * called by file->f_op->release to release the physical
-		 * memory region finally.
-		 */
-		if (mem->import_attach) {
-			struct dma_buf_attachment *attach = mem->import_attach;
-
-			if (mem->sgt)
-				dma_buf_unmap_attachment(attach, mem->sgt,
-							DMA_BIDIRECTIONAL);
-
-			dma_buf_put(attach->dmabuf);
-
-			dma_buf_detach(attach->dmabuf, attach);
-
-		}
-#endif
 		mem->release_func(mem->ctx, mem);
-
 		_mali_osk_free(mem);
 	}
 	else
@@ -306,7 +277,7 @@ _mali_osk_errcode_t _ump_ukk_release( _ump_uk_release_s *release_info )
 	}
 
 	_mali_osk_lock_signal(session_data->lock, _MALI_OSK_LOCKMODE_RW);
-	DBG_MSG_IF(1, _MALI_OSK_ERR_OK != ret, ("UMP memory with ID %u does not belong to this session.\n", secure_id));
+ 	DBG_MSG_IF(1, _MALI_OSK_ERR_OK != ret, ("UMP memory with ID %u does not belong to this session.\n", secure_id));
 
 	DBG_MSG(4, ("_ump_ukk_release() returning 0x%x\n", ret));
 	return ret;
@@ -584,8 +555,6 @@ void _ump_ukk_lock(_ump_uk_lock_s *args )
 
 	mem->lock_usage = (ump_lock_usage) args->lock_usage;
 
-	/** TODO: TAKE LOCK HERE */
-
 	ump_dd_reference_release(mem);
 }
 
@@ -608,8 +577,6 @@ void _ump_ukk_unlock(_ump_uk_unlock_s *args )
 	DBG_MSG(1, ("UMP[%02u] Unlocking. Old Lock flag:\n", (u32)args->secure_id, (u32) mem->lock_usage ));
 
 	mem->lock_usage = (ump_lock_usage) UMP_NOT_LOCKED;
-
-	/** TODO: RELEASE LOCK HERE */
 
 	ump_dd_reference_release(mem);
 }

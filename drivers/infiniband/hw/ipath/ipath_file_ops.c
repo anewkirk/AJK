@@ -39,6 +39,7 @@
 #include <linux/slab.h>
 #include <linux/highmem.h>
 #include <linux/io.h>
+#include <linux/aio.h>
 #include <linux/jiffies.h>
 #include <asm/pgtable.h>
 
@@ -1223,7 +1224,7 @@ static int mmap_kvaddr(struct vm_area_struct *vma, u64 pgaddr,
 
 	vma->vm_pgoff = (unsigned long) addr >> PAGE_SHIFT;
 	vma->vm_ops = &ipath_file_vm_ops;
-	vma->vm_flags |= VM_RESERVED | VM_DONTEXPAND;
+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
 	ret = 1;
 
 bail:

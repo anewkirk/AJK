@@ -533,7 +533,7 @@ struct devfreq *devfreq_add_device(struct device *dev,
 		pm_qos_add_notifier(profile->qos_type, &devfreq->qos_nb);
 	}
 
-	dev_set_name(&devfreq->dev, dev_name(dev));
+	dev_set_name(&devfreq->dev, "%s", dev_name(dev));
 	err = device_register(&devfreq->dev);
 	if (err) {
 		put_device(&devfreq->dev);
@@ -814,12 +814,14 @@ struct opp *devfreq_recommended_opp(struct device *dev, unsigned long *freq,
 	if (floor) {
 		opp = opp_find_freq_floor(dev, freq);
 
-		if (opp == ERR_PTR(-ENODEV))
+		/* If not available, use the closest opp */
+		if (opp == ERR_PTR(-ERANGE))
 			opp = opp_find_freq_ceil(dev, freq);
 	} else {
 		opp = opp_find_freq_ceil(dev, freq);
 
-		if (opp == ERR_PTR(-ENODEV))
+		/* If not available, use the closest opp */
+		if (opp == ERR_PTR(-ERANGE))
 			opp = opp_find_freq_floor(dev, freq);
 	}
 

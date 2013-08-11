@@ -1072,9 +1072,9 @@ static int ffs_sb_fill(struct super_block *sb, void *_data, int silent)
 				  &simple_dir_operations,
 				  &simple_dir_inode_operations,
 				  &data->perms);
-	if (unlikely(!inode))
-		goto enomem1;
-	d = d_alloc_root(inode);
+	d = d_make_root(inode);
+	if (unlikely(!d))
+		goto Enomem1;
 	if (unlikely(!d))
 		goto enomem2;
 	sb->s_root = d;
@@ -1495,7 +1495,21 @@ static int functionfs_bind_config(struct usb_composite_dev *cdev,
 
 static void ffs_func_free(struct ffs_function *func)
 {
+	struct ffs_ep *ep         = func->eps;
+	unsigned count            = func->ffs->eps_count;
+	unsigned long flags;
+
 	ENTER();
+
+	/* cleanup after autoconfig */
+	spin_lock_irqsave(&func->ffs->eps_lock, flags);
+	do {
+		if (ep->ep && ep->req)
+			usb_ep_free_request(ep->ep, ep->req);
+		ep->req = NULL;
+		++ep;
+	} while (--count);
+	spin_unlock_irqrestore(&func->ffs->eps_lock, flags);
 
 	ffs_data_put(func->ffs);
 

@@ -554,7 +554,6 @@ static struct css_set *find_existing_css_set(
 {
 	int i;
 	struct cgroupfs_root *root = cgrp->root;
-	struct hlist_node *node;
 	struct css_set *cg;
 	unsigned long key;
 
@@ -577,7 +576,7 @@ static struct css_set *find_existing_css_set(
 	}
 
 	key = css_set_hash(template);
-	hash_for_each_possible(css_set_table, cg, node, hlist, key) {
+	hash_for_each_possible(css_set_table, cg, hlist, key) {
 		if (!compare_css_sets(cg, oldcg, cgrp, template))
 			continue;
 
@@ -1423,8 +1422,8 @@ static void init_cgroup_root(struct cgroupfs_root *root)
 	root->number_of_cgroups = 1;
 	cgrp->root = root;
 	cgrp->top_cgroup = cgrp;
-	list_add_tail(&cgrp->allcg_node, &root->allcg_list);
 	init_cgroup_housekeeping(cgrp);
+	list_add_tail(&cgrp->allcg_node, &root->allcg_list);
 }
 
 static bool init_root_id(struct cgroupfs_root *root)
@@ -1549,7 +1548,6 @@ static int cgroup_get_rootdir(struct super_block *sb)
 
 	struct inode *inode =
 		cgroup_new_inode(S_IFDIR | S_IRUGO | S_IXUGO | S_IWUSR, sb);
-	struct dentry *dentry;
 
 	if (!inode)
 		return -ENOMEM;
@@ -1558,12 +1556,9 @@ static int cgroup_get_rootdir(struct super_block *sb)
 	inode->i_op = &cgroup_dir_inode_operations;
 	/* directories start off with i_nlink == 2 (for "." entry) */
 	inc_nlink(inode);
-	dentry = d_alloc_root(inode);
-	if (!dentry) {
-		iput(inode);
+	sb->s_root = d_make_root(inode);
+	if (!sb->s_root)
 		return -ENOMEM;
-	}
-	sb->s_root = dentry;
 	/* for everything else we want ->d_op set */
 	sb->s_d_op = &cgroup_dops;
 	return 0;
@@ -1615,7 +1610,6 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		struct cgroupfs_root *existing_root;
 		const struct cred *cred;
 		int i;
-		struct hlist_node *node;
 		struct css_set *cg;
 
 		BUG_ON(sb->s_root != NULL);
@@ -1670,7 +1664,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		/* Link the top cgroup in this hierarchy into all
 		 * the css_set objects */
 		write_lock(&css_set_lock);
-		hash_for_each(css_set_table, i, node, cg, hlist)
+		hash_for_each(css_set_table, i, cg, hlist)
 			link_css_set(&tmp_cg_links, cg, root_cgrp);
 		write_unlock(&css_set_lock);
 
@@ -2257,11 +2251,11 @@ retry_find_task:
 		tsk = tsk->group_leader;
 
 	/*
-	 * Workqueue threads may acquire PF_THREAD_BOUND and become
+	 * Workqueue threads may acquire PF_NO_SETAFFINITY and become
 	 * trapped in a cpuset, or RT worker may be born in a cgroup
 	 * with no rt_runtime allocated.  Just say no.
 	 */
-	if (tsk == kthreadd_task || (tsk->flags & PF_THREAD_BOUND)) {
+	if (tsk == kthreadd_task || (tsk->flags & PF_NO_SETAFFINITY)) {
 		ret = -EINVAL;
 		rcu_read_unlock();
 		goto out_unlock_cgroup;
@@ -4527,7 +4521,7 @@ int __init_or_module cgroup_load_subsys(struct cgroup_subsys *ss)
 {
 	struct cgroup_subsys_state *css;
 	int i, ret;
-	struct hlist_node *node, *tmp;
+	struct hlist_node *tmp;
 	struct css_set *cg;
 	unsigned long key;
 
@@ -4595,7 +4589,7 @@ int __init_or_module cgroup_load_subsys(struct cgroup_subsys *ss)
 	 * this is all done under the css_set_lock.
 	 */
 	write_lock(&css_set_lock);
-	hash_for_each_safe(css_set_table, i, node, tmp, cg, hlist) {
+	hash_for_each_safe(css_set_table, i, tmp, cg, hlist) {
 		/* skip entries that we already rehashed */
 		if (cg->subsys[ss->subsys_id])
 			continue;
@@ -4605,7 +4599,7 @@ int __init_or_module cgroup_load_subsys(struct cgroup_subsys *ss)
 		cg->subsys[ss->subsys_id] = css;
 		/* recompute hash and restore entry */
 		key = css_set_hash(cg->subsys);
-		hash_add(css_set_table, node, key);
+		hash_add(css_set_table, &cg->hlist, key);
 	}
 	write_unlock(&css_set_lock);
 
@@ -4653,7 +4647,6 @@ void cgroup_unload_subsys(struct cgroup_subsys *ss)
 	ss->active = 0;
 
 	if (ss->use_id) {
-		idr_remove_all(&ss->idr);
 		idr_destroy(&ss->idr);
 	}
 
@@ -5356,7 +5349,7 @@ EXPORT_SYMBOL_GPL(free_css_id);
 static struct css_id *get_new_cssid(struct cgroup_subsys *ss, int depth)
 {
 	struct css_id *newid;
-	int myid, error, size;
+	int ret, size;
 
 	BUG_ON(!ss->use_id);
 
@@ -5364,35 +5357,24 @@ static struct css_id *get_new_cssid(struct cgroup_subsys *ss, int depth)
 	newid = kzalloc(size, GFP_KERNEL);
 	if (!newid)
 		return ERR_PTR(-ENOMEM);
-	/* get id */
-	if (unlikely(!idr_pre_get(&ss->idr, GFP_KERNEL))) {
-		error = -ENOMEM;
-		goto err_out;
-	}
+
+	idr_preload(GFP_KERNEL);
 	spin_lock(&ss->id_lock);
 	/* Don't use 0. allocates an ID of 1-65535 */
-	error = idr_get_new_above(&ss->idr, newid, 1, &myid);
+	ret = idr_alloc(&ss->idr, newid, 1, CSS_ID_MAX + 1, GFP_NOWAIT);
 	spin_unlock(&ss->id_lock);
+	idr_preload_end();
 
 	/* Returns error when there are no free spaces for new ID.*/
-	if (error) {
-		error = -ENOSPC;
+	if (ret < 0)
 		goto err_out;
-	}
-	if (myid > CSS_ID_MAX)
-		goto remove_idr;
 
-	newid->id = myid;
+	newid->id = ret;
 	newid->depth = depth;
 	return newid;
-remove_idr:
-	error = -ENOSPC;
-	spin_lock(&ss->id_lock);
-	idr_remove(&ss->idr, myid);
-	spin_unlock(&ss->id_lock);
 err_out:
 	kfree(newid);
-	return ERR_PTR(error);
+	return ERR_PTR(ret);
 
 }
 

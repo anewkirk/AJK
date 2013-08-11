@@ -11,6 +11,7 @@
  *  You may use this code as per GPL version 2
  */
 
+#include <linux/module.h>
 #include <linux/ctype.h>
 #include <linux/device.h>
 #include <linux/power_supply.h>
@@ -51,7 +52,7 @@ static ssize_t power_supply_show_property(struct device *dev,
 		"Unknown", "Charging", "Discharging", "Not charging", "Full"
 	};
 	static char *charge_type[] = {
-		"Unknown", "N/A", "Trickle", "Fast"
+		"Unknown", "N/A", "Trickle", "Fast", "Slow"
 	};
 	static char *health_text[] = {
 		"Unknown", "Good", "Overheat", "Dead", "Over voltage",

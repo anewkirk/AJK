@@ -69,6 +69,9 @@
 #include <asm/stacktrace.h>
 #include <asm/io.h>
 #endif
+#ifdef CONFIG_SPARC
+#include <asm/setup.h>
+#endif
 #ifdef CONFIG_BSD_PROCESS_ACCT
 #include <linux/acct.h>
 #endif
@@ -93,10 +96,12 @@
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
 extern int max_threads;
-extern int core_uses_pid;
 extern int suid_dumpable;
+#ifdef CONFIG_COREDUMP
+extern int core_uses_pid;
 extern char core_pattern[];
 extern unsigned int core_pipe_limit;
+#endif
 extern int pid_max;
 extern int min_free_order_shift;
 extern int pid_max_min, pid_max_max;
@@ -177,6 +182,13 @@ static int proc_taint(struct ctl_table *table, int write,
 #ifdef CONFIG_PRINTK
 static int proc_dointvec_minmax_sysadmin(struct ctl_table *table, int write,
 				void __user *buffer, size_t *lenp, loff_t *ppos);
+#endif
+
+static int proc_dointvec_minmax_coredump(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
+#ifdef CONFIG_COREDUMP
+static int proc_dostring_coredump(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
 #endif
 
 #ifdef CONFIG_MAGIC_SYSRQ
@@ -526,6 +538,7 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_COREDUMP
 	{
 		.procname	= "core_uses_pid",
 		.data		= &core_uses_pid,
@@ -538,7 +551,7 @@ static struct ctl_table kern_table[] = {
 		.data		= core_pattern,
 		.maxlen		= CORENAME_MAX_SIZE,
 		.mode		= 0644,
-		.proc_handler	= proc_dostring,
+		.proc_handler	= proc_dostring_coredump,
 	},
 	{
 		.procname	= "core_pipe_limit",
@@ -547,6 +560,7 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#endif
 #ifdef CONFIG_PROC_SYSCTL
 	{
 		.procname	= "tainted",
@@ -681,7 +695,7 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 #endif
-#ifdef CONFIG_HOTPLUG
+
 	{
 		.procname	= "hotplug",
 		.data		= &uevent_helper,
@@ -689,7 +703,7 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dostring,
 	},
-#endif
+
 #ifdef CONFIG_CHR_DEV_SG
 	{
 		.procname	= "sg-big-buff",
@@ -855,7 +869,7 @@ static struct ctl_table kern_table[] = {
 #if defined(CONFIG_LOCKUP_DETECTOR)
 	{
 		.procname       = "watchdog",
-		.data           = &watchdog_enabled,
+		.data           = &watchdog_user_enabled,
 		.maxlen         = sizeof (int),
 		.mode           = 0644,
 		.proc_handler   = proc_dowatchdog,
@@ -882,7 +896,7 @@ static struct ctl_table kern_table[] = {
 	},
 	{
 		.procname       = "nmi_watchdog",
-		.data           = &watchdog_enabled,
+		.data           = &watchdog_user_enabled,
 		.maxlen         = sizeof (int),
 		.mode           = 0644,
 		.proc_handler   = proc_dowatchdog,
@@ -914,6 +928,15 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_DEBUG_STACKOVERFLOW
+	{
+		.procname	= "panic_on_stackoverflow",
+		.data		= &sysctl_panic_on_stackoverflow,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{
 		.procname	= "bootloader_type",
 		.data		= &bootloader_type,
@@ -1481,6 +1504,20 @@ static struct ctl_table vm_table[] = {
 		.extra2		= &one,
 	},
 #endif
+	{
+		.procname	= "user_reserve_kbytes",
+		.data		= &sysctl_user_reserve_kbytes,
+		.maxlen		= sizeof(sysctl_user_reserve_kbytes),
+		.mode		= 0644,
+		.proc_handler	= proc_doulongvec_minmax,
+	},
+	{
+		.procname	= "admin_reserve_kbytes",
+		.data		= &sysctl_admin_reserve_kbytes,
+		.maxlen		= sizeof(sysctl_admin_reserve_kbytes),
+		.mode		= 0644,
+		.proc_handler	= proc_doulongvec_minmax,
+	},
 	{ }
 };
 
@@ -1617,7 +1654,7 @@ static struct ctl_table fs_table[] = {
 		.data		= &suid_dumpable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
+		.proc_handler	= proc_dointvec_minmax_coredump,
 		.extra1		= &zero,
 		.extra2		= &two,
 	},
@@ -2605,6 +2642,38 @@ int proc_dointvec_minmax(struct ctl_table *table, int write,
 	return do_proc_dointvec(table, write, buffer, lenp, ppos,
 				do_proc_dointvec_minmax_conv, &param);
 }
+
+static void validate_coredump_safety(void)
+{
+#ifdef CONFIG_COREDUMP
+	if (suid_dumpable == SUID_DUMP_ROOT &&
+	    core_pattern[0] != '/' && core_pattern[0] != '|') {
+		printk(KERN_WARNING "Unsafe core_pattern used with "\
+			"suid_dumpable=2. Pipe handler or fully qualified "\
+			"core dump path required.\n");
+	}
+#endif
+}
+
+static int proc_dointvec_minmax_coredump(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int error = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (!error)
+		validate_coredump_safety();
+	return error;
+}
+
+#ifdef CONFIG_COREDUMP
+static int proc_dostring_coredump(struct ctl_table *table, int write,
+		  void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int error = proc_dostring(table, write, buffer, lenp, ppos);
+	if (!error)
+		validate_coredump_safety();
+	return error;
+}
+#endif
 
 static int __do_proc_doulongvec_minmax(void *data, struct ctl_table *table, int write,
 				     void __user *buffer,

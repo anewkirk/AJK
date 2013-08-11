@@ -40,16 +40,12 @@ int ecryptfs_write_lower(struct inode *ecryptfs_inode, char *data,
 			 loff_t offset, size_t size)
 {
 	struct file *lower_file;
-	mm_segment_t fs_save;
 	ssize_t rc;
 
 	lower_file = ecryptfs_inode_to_private(ecryptfs_inode)->lower_file;
 	if (!lower_file)
 		return -EIO;
-	fs_save = get_fs();
-	set_fs(get_ds());
-	rc = vfs_write(lower_file, data, size, &offset);
-	set_fs(fs_save);
+	rc = kernel_write(lower_file, data, size, offset);
 	mark_inode_dirty_sync(ecryptfs_inode);
 	return rc;
 }
@@ -304,7 +300,7 @@ int ecryptfs_read_lower_page_segment(struct page *page_for_ecryptfs,
 int ecryptfs_read(char *data, loff_t offset, size_t size,
 		  struct file *ecryptfs_file)
 {
-	struct inode *ecryptfs_inode = ecryptfs_file->f_dentry->d_inode;
+	struct inode *ecryptfs_inode = ecryptfs_file_inode(file);
 	struct page *ecryptfs_page;
 	char *ecryptfs_page_virt;
 	loff_t ecryptfs_file_size = i_size_read(ecryptfs_inode);

@@ -22,6 +22,7 @@
 #include <linux/pm_runtime.h>
 
 #include "base.h"
+#include "power/power.h"
 
 #define to_platform_driver(drv)	(container_of((drv), struct platform_driver, \
 				 driver))
@@ -925,7 +926,6 @@ int platform_pm_restore_noirq(struct device *dev)
 static const struct dev_pm_ops platform_dev_pm_ops = {
 	.runtime_suspend = pm_generic_runtime_suspend,
 	.runtime_resume = pm_generic_runtime_resume,
-	.runtime_idle = pm_generic_runtime_idle,
 	USE_PLATFORM_PM_SLEEP_OPS
 };
 
@@ -1052,6 +1052,7 @@ void __init early_platform_add_devices(struct platform_device **devs, int num)
 		dev = &devs[i]->dev;
 
 		if (!dev->devres_head.next) {
+			pm_runtime_early_init(dev);
 			INIT_LIST_HEAD(&dev->devres_head);
 			list_add_tail(&dev->devres_head,
 				      &early_platform_device_list);

@@ -918,11 +918,11 @@ static void mali_memory_core_session_end(struct mali_session_data * mali_session
 						(void*)block_mali_addr_get(block),
 						block_size_get(block),
 						block_mapping_get(block))
-				   	);
+					);
 
 			/* free the block */
 			/** @note manual type safety check-point */
-    		uk_args.ctx = mali_session_data;
+			uk_args.ctx = mali_session_data;
 			uk_args.cookie = (u32)block->descriptor;
 			err = _mali_ukk_free_big_block_internal( mali_session_data, session_data, &uk_args );
 

@@ -74,8 +74,9 @@ config OPTPROBES
 
 config UPROBES
 	bool "Transparent user-space probes (EXPERIMENTAL)"
-	depends on ARCH_SUPPORTS_UPROBES
+	depends on UPROBE_EVENT && PERF_EVENTS
 	default n
+	select PERCPU_RWSEM
 	help
 	  Uprobes is the user-space counterpart to kprobes: they
 	  enable instrumentation applications (such as 'perf probe')
@@ -109,9 +110,6 @@ config HAVE_EFFICIENT_UNALIGNED_ACCESS
 	  See Documentation/unaligned-memory-access.txt for more
 	  information on the topic of unaligned memory accesses.
 
-config HAVE_SYSCALL_WRAPPERS
-	bool
-
 config KRETPROBES
 	def_bool y
 	depends on KPROBES && HAVE_KRETPROBES
@@ -134,6 +132,9 @@ config HAVE_KRETPROBES
 
 config HAVE_OPTPROBES
 	bool
+
+config HAVE_NMI_WATCHDOG
+	bool
 #
 # An arch should select this if it provides all these things:
 #
@@ -153,13 +154,34 @@ config HAVE_ARCH_TRACEHOOK
 config HAVE_DMA_ATTRS
 	bool
 
-config USE_GENERIC_SMP_HELPERS
-	bool
-
 config HAVE_DMA_CONTIGUOUS
 	bool
 
+config USE_GENERIC_SMP_HELPERS
+	bool
+
 config GENERIC_SMP_IDLE_THREAD
+	bool
+
+config GENERIC_IDLE_POLL_SETUP
+	bool
+
+config GENERIC_IDLE_LOOP
+	bool
+
+# Select if arch init_task initializer is different to init/init_task.c
+config ARCH_INIT_TASK
+       bool
+
+# Select if arch has its private alloc_task_struct() function
+config ARCH_TASK_STRUCT_ALLOCATOR
+	bool
+
+# Select if arch has its private alloc_thread_info() function
+config ARCH_THREAD_INFO_ALLOCATOR
+	bool
+
+config HAVE_GENERIC_INIT_TASK
        bool
 
 config HAVE_REGS_AND_STACK_ACCESS_API
@@ -237,6 +259,62 @@ config HAVE_MOD_ARCH_SPECIFIC
 	  just need a simple module loader without arch specific data - those
 	  should not enable this.
 
+config GENERIC_KERNEL_THREAD
+	bool
+
+config GENERIC_KERNEL_EXECVE
+	bool
+
+config ARCH_WANT_IPC_PARSE_VERSION
+	bool
+
+config ARCH_WANT_COMPAT_IPC_PARSE_VERSION
+	bool
+
+config ARCH_WANT_OLD_COMPAT_IPC
+	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION
+	bool
+
+config HAVE_ARCH_SECCOMP_FILTER
+	bool
+	help
+	  This symbol should be selected by an architecure if it provides:
+	  asm/syscall.h:
+	  - syscall_get_arch()
+	  - syscall_get_arguments()
+	  - syscall_rollback()
+	  - syscall_set_return_value()
+	  SIGSYS siginfo_t support must be implemented.
+	  __secure_computing()/secure_computing()'s return value must be
+	  checked, with -1 resulting in the syscall being skipped.
+
+config SECCOMP_FILTER
+	def_bool y
+	depends on HAVE_ARCH_SECCOMP_FILTER && SECCOMP && NET
+	help
+	  Enable tasks to build secure computing environments defined
+	  in terms of Berkeley Packet Filter programs which implement
+	  task-defined system call filtering polices.
+
+	  See Documentation/prctl/seccomp_filter.txt for details.
+
+config HAVE_CONTEXT_TRACKING
+	bool
+	help
+	  Provide kernel/user boundaries probes necessary for subsystems
+	  that need it, such as userspace RCU extended quiescent state.
+	  Syscalls need to be wrapped inside user_exit()-user_enter() through
+	  the slow path using TIF_NOHZ flag. Exceptions handlers must be
+	  wrapped as well. Irqs are already protected inside
+	  rcu_irq_enter/rcu_irq_exit() but preemption or signal handling on
+	  irq exit still need to be protected.
+
+config HAVE_ARCH_TRANSPARENT_HUGEPAGE
+	bool
+
+config HAVE_ARCH_SOFT_DIRTY
+	bool
+
 config MODULES_USE_ELF_RELA
 	bool
 	help
@@ -248,5 +326,40 @@ config MODULES_USE_ELF_REL
 	help
 	  Modules only use ELF REL relocations.  Modules with ELF RELA
 	  relocations will give an error.
+
+config HAVE_UNDERSCORE_SYMBOL_PREFIX
+	bool
+	help
+	  Some architectures generate an _ in front of C symbols; things like
+	  module loading and assembly files need to know about this.
+
+#
+# ABI hall of shame
+#
+config ODD_RT_SIGACTION
+	bool
+	help
+	  Architecture has unusual rt_sigaction(2) arguments
+
+config OLD_SIGSUSPEND
+	bool
+	help
+	  Architecture has old sigsuspend(2) syscall, of one-argument variety
+
+config OLD_SIGSUSPEND3
+	bool
+	help
+	  Even weirder antique ABI - three-argument sigsuspend(2)
+
+config OLD_SIGACTION
+	bool
+	help
+	  Architecture has old sigaction(2) syscall.  Nope, not the same
+	  as OLD_SIGSUSPEND | OLD_SIGSUSPEND3 - alpha has sigsuspend(2),
+	  but fairly different variant of sigaction(2), thanks to OSF/1
+	  compatibility...
+
+config COMPAT_OLD_SIGACTION
+	bool
 
 source "kernel/gcov/Kconfig"

@@ -13,6 +13,14 @@
  */
 
 #ifdef CONFIG_CGROUP_BFQIO
+
+static DEFINE_MUTEX(bfqio_mutex);
+
+static bool bfqio_is_removed(struct cgroup *cgroup)
+{
+	return test_bit(CGRP_REMOVED, &cgroup->flags);
+}
+
 static struct bfqio_cgroup bfqio_root_cgroup = {
 	.weight = BFQ_DEFAULT_GRP_WEIGHT,
 	.ioprio = BFQ_DEFAULT_GRP_IOPRIO,
@@ -44,10 +52,9 @@ static struct bfq_group *bfqio_lookup_group(struct bfqio_cgroup *bgrp,
 					    struct bfq_data *bfqd)
 {
 	struct bfq_group *bfqg;
-	struct hlist_node *n;
 	void *key;
 
-	hlist_for_each_entry_rcu(bfqg, n, &bgrp->group_data, group_node) {
+	hlist_for_each_entry_rcu(bfqg, &bgrp->group_data, group_node) {
 		key = rcu_dereference(bfqg->bfqd);
 		if (key == bfqd)
 			return bfqg;
@@ -61,11 +68,22 @@ static inline void bfq_group_init_entity(struct bfqio_cgroup *bgrp,
 {
 	struct bfq_entity *entity = &bfqg->entity;
 
-	entity->weight = entity->new_weight = bgrp->weight;
-	entity->orig_weight = entity->new_weight;
-	entity->ioprio = entity->new_ioprio = bgrp->ioprio;
+	/*
+	 * If the weight of the entity has never been set via the sysfs
+	 * interface, then bgrp->weight == 0. In this case we initialize
+	 * the weight from the current ioprio value. Otherwise, the group
+	 * weight, if set, has priority over the ioprio value.
+	 */
+	if (bgrp->weight == 0) {
+		entity->new_weight = bfq_ioprio_to_weight(bgrp->ioprio);
+		entity->new_ioprio = bgrp->ioprio;
+	} else {
+		entity->new_weight = bgrp->weight;
+		entity->new_ioprio = bfq_weight_to_ioprio(bgrp->weight);
+	}
+	entity->orig_weight = entity->weight = entity->new_weight;
+	entity->ioprio = entity->new_ioprio;
 	entity->ioprio_class = entity->new_ioprio_class = bgrp->ioprio_class;
-	entity->ioprio_changed = 1;
 	entity->my_sched_data = &bfqg->sched_data;
 }
 
@@ -519,6 +537,15 @@ static void bfq_destroy_group(struct bfqio_cgroup *bgrp, struct bfq_group *bfqg)
 	kfree(bfqg);
 }
 
+static void bfq_end_raising_async(struct bfq_data *bfqd)
+{
+	struct hlist_node *tmp;
+	struct bfq_group *bfqg;
+
+	hlist_for_each_entry_safe(bfqg, tmp, &bfqd->group_list, bfqd_node)
+		bfq_end_raising_async_queues(bfqd, bfqg);
+}
+
 /**
  * bfq_disconnect_groups - diconnect @bfqd from all its groups.
  * @bfqd: the device descriptor being exited.
@@ -529,11 +556,11 @@ static void bfq_destroy_group(struct bfqio_cgroup *bgrp, struct bfq_group *bfqg)
  */
 static void bfq_disconnect_groups(struct bfq_data *bfqd)
 {
-	struct hlist_node *pos, *n;
+	struct hlist_node *tmp;
 	struct bfq_group *bfqg;
 
 	bfq_log(bfqd, "disconnect_groups beginning") ;
-	hlist_for_each_entry_safe(bfqg, pos, n, &bfqd->group_list, bfqd_node) {
+	hlist_for_each_entry_safe(bfqg, tmp, &bfqd->group_list, bfqd_node) {
 		hlist_del(&bfqg->bfqd_node);
 
 		__bfq_deactivate_entity(bfqg->my_entity, 0);
@@ -599,18 +626,19 @@ static u64 bfqio_cgroup_##__VAR##_read(struct cgroup *cgroup,		\
 				       struct cftype *cftype)		\
 {									\
 	struct bfqio_cgroup *bgrp;					\
-	u64 ret;							\
+	u64 ret = -ENODEV;						\
 									\
-	if (!cgroup_lock_live_group(cgroup))				\
-		return -ENODEV;						\
+	mutex_lock(&bfqio_mutex);					\
+	if (bfqio_is_removed(cgroup))					\
+		goto out_unlock;					\
 									\
 	bgrp = cgroup_to_bfqio(cgroup);					\
 	spin_lock_irq(&bgrp->lock);					\
 	ret = bgrp->__VAR;						\
 	spin_unlock_irq(&bgrp->lock);					\
 									\
-	cgroup_unlock();						\
-									\
+out_unlock:								\
+	mutex_unlock(&bfqio_mutex);					\
 	return ret;							\
 }
 
@@ -626,28 +654,39 @@ static int bfqio_cgroup_##__VAR##_write(struct cgroup *cgroup,		\
 {									\
 	struct bfqio_cgroup *bgrp;					\
 	struct bfq_group *bfqg;						\
-	struct hlist_node *n;						\
+	int ret = -EINVAL;						\
 									\
 	if (val < (__MIN) || val > (__MAX))				\
-		return -EINVAL;						\
+		return ret;						\
 									\
-	if (!cgroup_lock_live_group(cgroup))				\
-		return -ENODEV;						\
+	ret = -ENODEV;							\
+	mutex_lock(&bfqio_mutex);					\
+	if (bfqio_is_removed(cgroup))					\
+		goto out_unlock;					\
+	ret = 0;							\
 									\
 	bgrp = cgroup_to_bfqio(cgroup);					\
 									\
 	spin_lock_irq(&bgrp->lock);					\
 	bgrp->__VAR = (unsigned short)val;				\
-	hlist_for_each_entry(bfqg, n, &bgrp->group_data, group_node) {	\
-		bfqg->entity.new_##__VAR = (unsigned short)val;		\
-		smp_wmb();						\
-		bfqg->entity.ioprio_changed = 1;			\
+	hlist_for_each_entry(bfqg, &bgrp->group_data, group_node) {	\
+		/*							\
+                 * Setting the ioprio_changed flag of the entity        \
+                 * to 1 with new_##__VAR == ##__VAR would re-set        \
+                 * the value of the weight to its ioprio mapping.       \
+                 * Set the flag only if necessary.                      \
+                 */                                                     \
+                if ((unsigned short)val != bfqg->entity.new_##__VAR) {  \
+                        bfqg->entity.new_##__VAR = (unsigned short)val; \
+                        smp_wmb();                                      \
+                        bfqg->entity.ioprio_changed = 1;                \
+                }							\
 	}								\
 	spin_unlock_irq(&bgrp->lock);					\
 									\
-	cgroup_unlock();						\
-									\
-	return 0;							\
+out_unlock:								\
+	mutex_unlock(&bfqio_mutex);					\
+	return ret;							\
 }
 
 STORE_FUNCTION(weight, BFQ_MIN_WEIGHT, BFQ_MAX_WEIGHT);
@@ -671,18 +710,10 @@ static struct cftype bfqio_files[] = {
 		.read_u64 = bfqio_cgroup_ioprio_class_read,
 		.write_u64 = bfqio_cgroup_ioprio_class_write,
 	},
-	{ }  /* terminate */
+	{ },	/* terminate */
 };
 
-#if 0
-static int bfqio_populate(struct cgroup_subsys *subsys, struct cgroup *cgroup)
-{
-	return cgroup_add_files(cgroup, subsys, bfqio_files,
-				ARRAY_SIZE(bfqio_files));
-}
-#endif
-
-static struct cgroup_subsys_state *bfqio_css_alloc(struct cgroup *cgroup)
+static struct cgroup_subsys_state *bfqio_create(struct cgroup *cgroup)
 {
 	struct bfqio_cgroup *bgrp;
 
@@ -740,7 +771,6 @@ static void bfqio_attach(struct cgroup *cgroup, struct cgroup_taskset *tset)
 	struct task_struct *task;
 	struct io_context *ioc;
 	struct io_cq *icq;
-	struct hlist_node *n;
 
 	/*
 	 * IMPORTANT NOTE: The move of more than one process at a time to a
@@ -753,7 +783,7 @@ static void bfqio_attach(struct cgroup *cgroup, struct cgroup_taskset *tset)
 			 * Handle cgroup change here.
 			 */
 			rcu_read_lock();
-			hlist_for_each_entry_rcu(icq, n, &ioc->icq_list, ioc_node)
+			hlist_for_each_entry_rcu(icq, &ioc->icq_list, ioc_node)
 				if (!strncmp(icq->q->elevator->type->elevator_name,
 					     "bfq", ELV_NAME_MAX))
 					bfq_bic_change_cgroup(icq_to_bic(icq),
@@ -764,10 +794,10 @@ static void bfqio_attach(struct cgroup *cgroup, struct cgroup_taskset *tset)
 	}
 }
 
-static void bfqio_css_free(struct cgroup *cgroup)
+static void bfqio_destroy(struct cgroup *cgroup)
 {
 	struct bfqio_cgroup *bgrp = cgroup_to_bfqio(cgroup);
-	struct hlist_node *n, *tmp;
+	struct hlist_node *tmp;
 	struct bfq_group *bfqg;
 
 	/*
@@ -777,7 +807,7 @@ static void bfqio_css_free(struct cgroup *cgroup)
 	 * cgroup is RCU-safe); bgrp->group_data will not be accessed by
 	 * anything else and we don't need any synchronization.
 	 */
-	hlist_for_each_entry_safe(bfqg, n, tmp, &bgrp->group_data, group_node)
+	hlist_for_each_entry_safe(bfqg, tmp, &bgrp->group_data, group_node)
 		bfq_destroy_group(bgrp, bfqg);
 
 	BUG_ON(!hlist_empty(&bgrp->group_data));
@@ -787,11 +817,10 @@ static void bfqio_css_free(struct cgroup *cgroup)
 
 struct cgroup_subsys bfqio_subsys = {
 	.name = "bfqio",
-	.css_alloc = bfqio_css_alloc, /* was .create = bfqio_create, */
+	.css_alloc = bfqio_create,
 	.can_attach = bfqio_can_attach,
 	.attach = bfqio_attach,
-	.css_free = bfqio_css_free, /* was .destroy = bfqio_destroy, */
-	/* .populate = bfqio_populate, */
+	.css_free = bfqio_destroy,
 	.subsys_id = bfqio_subsys_id,
 	.base_cftypes = bfqio_files,
 };
@@ -818,6 +847,11 @@ static inline void bfq_bfqq_move(struct bfq_data *bfqd,
 				 struct bfq_entity *entity,
 				 struct bfq_group *bfqg)
 {
+}
+
+static void bfq_end_raising_async(struct bfq_data *bfqd)
+{
+	bfq_end_raising_async_queues(bfqd, bfqd->root_group);
 }
 
 static inline void bfq_disconnect_groups(struct bfq_data *bfqd)

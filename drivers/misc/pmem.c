@@ -188,19 +188,19 @@ struct file_operations pmem_fops = {
 
 static int get_id(struct file *file)
 {
-	return MINOR(file->f_dentry->d_inode->i_rdev);
+	return MINOR(file_inode(file)->i_rdev);
 }
 
 int is_pmem_file(struct file *file)
 {
 	int id;
 
-	if (unlikely(!file || !file->f_dentry || !file->f_dentry->d_inode))
+	if (unlikely(!file || !file->f_dentry || !file_inode(file)))
 		return 0;
 	id = get_id(file);
 	if (unlikely(id >= PMEM_MAX_DEVICES))
 		return 0;
-	if (unlikely(file->f_dentry->d_inode->i_rdev !=
+	if (unlikely(file_inode(file)->i_rdev !=
 	     MKDEV(MISC_MAJOR, pmem[id].dev.minor)))
 		return 0;
 	return 1;
@@ -485,7 +485,8 @@ static int pmem_map_garbage(int id, struct vm_area_struct *vma,
 {
 	int i, garbage_pages = len >> PAGE_SHIFT;
 
-	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP | VM_SHARED | VM_WRITE;
+	vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP |
+			VM_PFNMAP | VM_SHARED | VM_WRITE;
 	for (i = 0; i < garbage_pages; i++) {
 		if (vm_insert_pfn(vma, vma->vm_start + offset + (i * PAGE_SIZE),
 		    pmem[id].garbage_pfn))

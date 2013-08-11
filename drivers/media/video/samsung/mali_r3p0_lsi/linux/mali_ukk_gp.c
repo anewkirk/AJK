@@ -36,7 +36,7 @@ int gp_start_job_wrapper(struct mali_session_data *session_data, _mali_uk_gp_sta
     if (_MALI_OSK_ERR_OK != err) return map_errcode(err);
 
     kargs.ctx = NULL; /* prevent kernel address to be returned to user space */
-    
+
     if (0 != copy_to_user(uargs, &kargs, sizeof(_mali_uk_gp_start_job_s)))
 	{
 		/*

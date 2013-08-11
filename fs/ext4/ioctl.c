@@ -141,7 +141,7 @@ flags_err:
 			err = ext4_ext_migrate(inode);
 flags_out:
 		mutex_unlock(&inode->i_mutex);
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 		return err;
 	}
 	case EXT4_IOC_GETVERSION:
@@ -189,7 +189,7 @@ flags_out:
 unlock_out:
 		mutex_unlock(&inode->i_mutex);
 setversion_out:
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 		return err;
 	}
 	case EXT4_IOC_GROUP_EXTEND: {
@@ -225,8 +225,7 @@ setversion_out:
 		}
 		if (err == 0)
 			err = err2;
-
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 group_extend_out:
 		ext4_resize_end(sb);
 		return err;
@@ -234,7 +233,7 @@ group_extend_out:
 
 	case EXT4_IOC_MOVE_EXT: {
 		struct move_extent me;
-		struct file *donor_filp;
+		struct fd donor;
 		int err;
 
 		if (!(filp->f_mode & FMODE_READ) ||
@@ -246,11 +245,11 @@ group_extend_out:
 			return -EFAULT;
 		me.moved_len = 0;
 
-		donor_filp = fget(me.donor_fd);
-		if (!donor_filp)
+		donor = fdget(me.donor_fd);
+		if (!donor.file)
 			return -EBADF;
 
-		if (!(donor_filp->f_mode & FMODE_WRITE)) {
+		if (!(donor.file->f_mode & FMODE_WRITE)) {
 			err = -EBADF;
 			goto mext_out;
 		}
@@ -266,15 +265,15 @@ group_extend_out:
 		if (err)
 			goto mext_out;
 
-		err = ext4_move_extents(filp, donor_filp, me.orig_start,
+		err = ext4_move_extents(filp, donor.file, me.orig_start,
 					me.donor_start, me.len, &me.moved_len);
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 
 		if (copy_to_user((struct move_extent __user *)arg,
 				 &me, sizeof(me)))
 			err = -EFAULT;
 mext_out:
-		fput(donor_filp);
+		fdput(donor);
 		return err;
 	}
 
@@ -313,7 +312,7 @@ mext_out:
 		if (err == 0)
 			err = err2;
 
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 group_add_out:
 		ext4_resize_end(sb);
 		return err;
@@ -337,7 +336,7 @@ group_add_out:
 		mutex_lock(&(inode->i_mutex));
 		err = ext4_ext_migrate(inode);
 		mutex_unlock(&(inode->i_mutex));
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 		return err;
 	}
 
@@ -351,7 +350,7 @@ group_add_out:
 		if (err)
 			return err;
 		err = ext4_alloc_da_blocks(inode);
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 		return err;
 	}
 

@@ -123,7 +123,7 @@ static void fuse_destroy_inode(struct inode *inode)
 static void fuse_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages(&inode->i_data, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 	if (inode->i_sb->s_flags & MS_ACTIVE) {
 		struct fuse_conn *fc = get_fuse_conn(inode);
 		struct fuse_inode *fi = get_fuse_inode(inode);
@@ -1006,14 +1006,9 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 
 	err = -ENOMEM;
 	root = fuse_get_root_inode(sb, d.rootmode);
-	if (!root)
+	root_dentry = d_make_root(root);
+	if (!root_dentry)
 		goto err_put_conn;
-
-	root_dentry = d_alloc_root(root);
-	if (!root_dentry) {
-		iput(root);
-		goto err_put_conn;
-	}
 	/* only now - we want root dentry with NULL ->d_op */
 	sb->s_d_op = &fuse_dentry_operations;
 

@@ -126,7 +126,7 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 			continue;
 		pte = ptep_get_and_clear(mm, old_addr, old_pte);
 		pte = move_pte(pte, new_vma->vm_page_prot, old_addr, new_addr);
-		set_pte_at(mm, new_addr, new_pte, pte);
+		set_pte_at(mm, new_addr, new_pte, pte_mksoft_dirty(pte));
 	}
 
 	arch_leave_lazy_mmu_mode();
@@ -389,10 +389,6 @@ static unsigned long mremap_to(unsigned long addr, unsigned long old_len,
 	if ((addr <= new_addr) && (addr+old_len) > new_addr)
 		goto out;
 
-	ret = security_file_mmap(NULL, 0, 0, 0, new_addr, 1);
-	if (ret)
-		goto out;
-
 	ret = do_munmap(mm, new_addr, new_len);
 	if (ret)
 		goto out;
@@ -551,9 +547,6 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 			goto out;
 		}
 
-		ret = security_file_mmap(NULL, 0, 0, 0, new_addr, 1);
-		if (ret)
-			goto out;
 		ret = move_vma(vma, addr, old_len, new_len, new_addr, &locked);
 	}
 out:

@@ -45,161 +45,19 @@ static void terminate_kernel_device(void);
 /* from the __malidrv_build_info.c file that is generated during build */
 extern const char *__malidrv_build_info(void);
 
-#if 0
-/* Module parameter to control log level */
-int mali_debug_level = 2;
-module_param(mali_debug_level, int, S_IRUSR | S_IWUSR | S_IWGRP | S_IRGRP | S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(mali_debug_level, "Higher number, more dmesg output");
-
-/* By default the module uses any available major, but it's possible to set it at load time to a specific number */
-#if MALI_MAJOR_PREDEFINE
-int mali_major = 244;
-#else
-int mali_major = 0;
-#endif
-module_param(mali_major, int, S_IRUGO); /* r--r--r-- */
-MODULE_PARM_DESC(mali_major, "Device major number");
-
-module_param(mali_max_job_runtime, int, S_IRUSR | S_IWUSR | S_IWGRP | S_IRGRP | S_IROTH);
-MODULE_PARM_DESC(mali_max_job_runtime, "Maximum allowed job runtime in msecs.\nJobs will be killed after this no matter what");
-
-extern int mali_l2_max_reads;
-module_param(mali_l2_max_reads, int, S_IRUSR | S_IRGRP | S_IROTH);
-MODULE_PARM_DESC(mali_l2_max_reads, "Maximum reads for Mali L2 cache");
-
-#if MALI_TIMELINE_PROFILING_ENABLED
-extern int mali_boot_profiling;
-module_param(mali_boot_profiling, int, S_IRUSR | S_IRGRP | S_IROTH);
-MODULE_PARM_DESC(mali_boot_profiling, "Start profiling as a part of Mali driver initialization");
-#endif
+/* all clock controls are in drivers/media/video/samsung/mali/linux/mali_kernel_linux.c */
 
 /* Export symbols from common code: mali_user_settings.c */
 #include "mali_user_settings_db.h"
 EXPORT_SYMBOL(mali_set_user_setting);
 EXPORT_SYMBOL(mali_get_user_setting);
-#if MALI_DVFS_ENABLED
-extern int mali_dvfs_control;
-module_param(mali_dvfs_control, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(mali_dvfs_control, "Mali Current DVFS");
-#if 0 //defined(CONFIG_CPU_EXYNOS4210)
-#else
 
-extern int step0_clk;
-module_param(step0_clk, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step0_clk, "Mali Current step0_clk");
-#ifdef DEBUG
-extern int step0_vol;
-module_param(step0_vol, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step0_vol, "Mali Current step0_vol");
-#endif
-
-#if (MALI_DVFS_STEPS > 1)
-extern int step1_clk;
-module_param(step1_clk, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step1_clk, "Mali Current step1_clk");
-
-extern int step0_up;
-module_param(step0_up, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step0_up, "Mali Current step0_up");
-
-extern int step1_down;
-module_param(step1_down, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step1_down, "Mali Current step1_down");
-#ifdef DEBUG
-extern int step1_vol;
-module_param(step1_vol, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step1_vol, "Mali Current step1_vol");
-#endif
-
-#if (MALI_DVFS_STEPS > 2)
-extern int step2_clk;
-module_param(step2_clk, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step2_clk, "Mali Current step2_clk");
-
-extern int step1_up;
-module_param(step1_up, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step1_up, "Mali Current step1_up");
-
-extern int step2_down;
-module_param(step2_down, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step2_down, "Mali Current step2_down");
-#ifdef DEBUG
-extern int step2_vol;
-module_param(step2_vol, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step2_vol, "Mali Current step2_vol");
-#endif
-
-#if (MALI_DVFS_STEPS > 3)
-extern int step3_clk;
-module_param(step3_clk, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step3_clk, "Mali Current step3_clk");
-
-extern int step2_up;
-module_param(step2_up, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step2_up, "Mali Current step2_up");
-
-extern int step3_down;
-module_param(step3_down, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step3_down, "Mali Current step3_down");
-#ifdef DEBUG
-extern int step3_vol;
-module_param(step3_vol, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step3_vol, "Mali Current step3_vol");
-#endif
-#if (MALI_DVFS_STEPS > 4)
-extern int step4_clk;
-module_param(step4_clk, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step4_clk, "Mali Current step4_clk");
-
-extern int step3_up;
-module_param(step3_up, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step3_up, "Mali Current step3_up");
-
-extern int step4_down;
-module_param(step4_down, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step4_down, "Mali Current step4_down");
-#ifdef DEBUG
-extern int step4_vol;
-module_param(step4_vol, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw-rw-r-- */
-MODULE_PARM_DESC(step4_vol, "Mali Current step4	_vol");
-#endif
-#endif
-#endif
-#endif
-#endif
-#endif
-#endif
-#else
-
-extern int mali_gpu_clk;
-module_param(mali_gpu_clk, int, S_IRUSR | S_IRGRP | S_IROTH); /* r--r--r-- */
-MODULE_PARM_DESC(mali_gpu_clk, "Mali Current Clock");
-
-//thanks to michyprima@XDA
-extern int mali_dvfs_utilization;
-module_param(mali_dvfs_utilization, int, S_IRUSR | S_IRGRP | S_IROTH); /* r--r--r-- */
-MODULE_PARM_DESC(mali_dvfs_utilization, "Mali Current Utilization");
-
-extern int mali_gpu_utilization_timeout;
-module_param(mali_gpu_utilization_timeout, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP| S_IROTH); /* rw--rw--r-- */
-MODULE_PARM_DESC(mali_gpu_utilization_timeout, "Mali GPU Utilization Timeout");
-
-extern int mali_gpu_vol;
-module_param(mali_gpu_vol, int, S_IRUSR | S_IRGRP | S_IROTH); /* r--r--r-- */
-MODULE_PARM_DESC(mali_gpu_vol, "Mali Current Voltage");
-
-extern int gpu_power_state;
-module_param(gpu_power_state, int, S_IRUSR | S_IRGRP | S_IROTH); /* r--r--r-- */
-MODULE_PARM_DESC(gpu_power_state, "Mali Power State");
 extern int mali_major;
-
-#endif
 
 static char mali_dev_name[] = "mali"; /* should be const, but the functions we call requires non-cost */
 
 /* the mali device */
 static struct mali_dev device;
-
 
 static int mali_open(struct inode *inode, struct file *filp);
 static int mali_release(struct inode *inode, struct file *filp);

@@ -29,6 +29,8 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/memblock.h>
+#include <linux/bug.h>
+#include <linux/compiler.h>
 
 #include <asm/unified.h>
 #include <asm/cp15.h>
@@ -48,11 +50,15 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>
+#include <asm/system_info.h>
+#include <asm/system_misc.h>
 #include <asm/traps.h>
 #include <asm/unwind.h>
 #ifdef CONFIG_MIDAS_COMMON
 #include <plat/cpu.h>
 #endif
+#include <asm/memblock.h>
+#include <asm/virt.h>
 
 #if defined(CONFIG_DEPRECATED_PARAM_STRUCT)
 #include "compat.h"
@@ -78,7 +84,7 @@ __setup("fpe=", fpe_setup);
 
 extern void paging_init(struct machine_desc *desc);
 extern void sanity_check_meminfo(void);
-extern void reboot_setup(char *str);
+extern enum reboot_mode reboot_mode;
 #ifdef CONFIG_DMA_CMA
 extern void setup_dma_zone(struct machine_desc *desc);
 #endif
@@ -121,6 +127,13 @@ struct cpu_cache_fns cpu_cache __read_mostly;
 struct outer_cache_fns outer_cache __read_mostly;
 EXPORT_SYMBOL(outer_cache);
 #endif
+
+/*
+ * Cached cpu_architecture() result for use by assembler code.
+ * C code should use the cpu_architecture() function instead of accessing this
+ * variable directly.
+ */
+int __cpu_architecture __read_mostly = CPU_ARCH_UNKNOWN;
 
 struct stack {
 	u32 irq[3];
@@ -217,7 +230,7 @@ static const char *proc_arch[] = {
 	"?(17)",
 };
 
-int cpu_architecture(void)
+static int __get_cpu_architecture(void)
 {
 	int cpu_arch;
 
@@ -248,6 +261,13 @@ int cpu_architecture(void)
 		cpu_arch = CPU_ARCH_UNKNOWN;
 
 	return cpu_arch;
+}
+
+int __pure cpu_architecture(void)
+{
+	BUG_ON(__cpu_architecture == CPU_ARCH_UNKNOWN);
+
+	return __cpu_architecture;
 }
 
 static int cpu_has_aliasing_icache(unsigned int arch)
@@ -351,68 +371,6 @@ static void __init feat_v6_fixup(void)
 		elf_hwcap &= ~HWCAP_TLS;
 }
 
-int __cpu_logical_map[NR_CPUS];
-
-void __init smp_setup_processor_id(void)
-{
-        int i;
-        u32 cpu = is_smp() ? read_cpuid_mpidr() & 0xff : 0;
-
-        cpu_logical_map(0) = cpu;
-        for (i = 1; i < NR_CPUS; ++i)
-                cpu_logical_map(i) = i == cpu ? 0 : i;
-
-        printk(KERN_INFO "Booting Linux on physical CPU %d\n", cpu);
-}
-
-static void __init setup_processor(void)
-{
-	struct proc_info_list *list;
-
-	/*
-	 * locate processor in the list of supported processor
-	 * types.  The linker builds this table for us from the
-	 * entries in arch/arm/mm/proc-*.S
-	 */
-	list = lookup_processor_type(read_cpuid_id());
-	if (!list) {
-		printk("CPU configuration botched (ID %08x), unable "
-		       "to continue.\n", read_cpuid_id());
-		while (1);
-	}
-
-	cpu_name = list->cpu_name;
-
-#ifdef MULTI_CPU
-	processor = *list->proc;
-#endif
-#ifdef MULTI_TLB
-	cpu_tlb = *list->tlb;
-#endif
-#ifdef MULTI_USER
-	cpu_user = *list->user;
-#endif
-#ifdef MULTI_CACHE
-	cpu_cache = *list->cache;
-#endif
-
-	printk("CPU: %s [%08x] revision %d (ARMv%s), cr=%08lx\n",
-	       cpu_name, read_cpuid_id(), read_cpuid_id() & 15,
-	       proc_arch[cpu_architecture()], cr_alignment);
-
-	sprintf(init_utsname()->machine, "%s%c", list->arch_name, ENDIANNESS);
-	sprintf(elf_platform, "%s%c", list->elf_name, ENDIANNESS);
-	elf_hwcap = list->elf_hwcap;
-#ifndef CONFIG_ARM_THUMB
-	elf_hwcap &= ~HWCAP_THUMB;
-#endif
-
-	feat_v6_fixup();
-
-	cacheid_init();
-	cpu_proc_init();
-}
-
 /*
  * cpu_init - initialise one CPU.
  *
@@ -427,6 +385,14 @@ void cpu_init(void)
 		printk(KERN_CRIT "CPU%u: bad primary CPU number\n", cpu);
 		BUG();
 	}
+
+	/*
+	 * This only works on resume and secondary cores. For booting on the
+	 * boot cpu, smp_prepare_boot_cpu is called after percpu area setup.
+	 */
+	set_my_cpu_offset(per_cpu_offset(cpu));
+
+	cpu_proc_init();
 
 	/*
 	 * Define the placement constraint for the inline asm directive below.
@@ -462,6 +428,69 @@ void cpu_init(void)
 	      "I" (offsetof(struct stack, und[0])),
 	      PLC (PSR_F_BIT | PSR_I_BIT | SVC_MODE)
 	    : "r14");
+}
+
+u32 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = MPIDR_INVALID };
+
+void __init smp_setup_processor_id(void)
+{
+        int i;
+        u32 cpu = is_smp() ? read_cpuid_mpidr() & 0xff : 0;
+
+        cpu_logical_map(0) = cpu;
+        for (i = 1; i < NR_CPUS; ++i)
+                cpu_logical_map(i) = i == cpu ? 0 : i;
+
+        printk(KERN_INFO "Booting Linux on physical CPU %d\n", cpu);
+}
+
+static void __init setup_processor(void)
+{
+	struct proc_info_list *list;
+
+	/*
+	 * locate processor in the list of supported processor
+	 * types.  The linker builds this table for us from the
+	 * entries in arch/arm/mm/proc-*.S
+	 */
+	list = lookup_processor_type(read_cpuid_id());
+	if (!list) {
+		printk("CPU configuration botched (ID %08x), unable "
+		       "to continue.\n", read_cpuid_id());
+		while (1);
+	}
+
+	cpu_name = list->cpu_name;
+	__cpu_architecture = __get_cpu_architecture();
+
+#ifdef MULTI_CPU
+	processor = *list->proc;
+#endif
+#ifdef MULTI_TLB
+	cpu_tlb = *list->tlb;
+#endif
+#ifdef MULTI_USER
+	cpu_user = *list->user;
+#endif
+#ifdef MULTI_CACHE
+	cpu_cache = *list->cache;
+#endif
+
+	printk("CPU: %s [%08x] revision %d (ARMv%s), cr=%08lx\n",
+	       cpu_name, read_cpuid_id(), read_cpuid_id() & 15,
+	       proc_arch[cpu_architecture()], cr_alignment);
+
+	sprintf(init_utsname()->machine, "%s%c", list->arch_name, ENDIANNESS);
+	sprintf(elf_platform, "%s%c", list->elf_name, ENDIANNESS);
+	elf_hwcap = list->elf_hwcap;
+#ifndef CONFIG_ARM_THUMB
+	elf_hwcap &= ~HWCAP_THUMB;
+#endif
+
+	feat_v6_fixup();
+
+	cacheid_init();
+	cpu_proc_init();
 }
 
 void __init dump_machine_table(void)
@@ -757,6 +786,14 @@ static int __init customize_machine(void)
 }
 arch_initcall(customize_machine);
 
+static int __init init_machine_late(void)
+{
+	if (machine_desc->init_late)
+		machine_desc->init_late();
+	return 0;
+}
+late_initcall(init_machine_late);
+
 #ifdef CONFIG_KEXEC
 static inline unsigned long long get_total_mem(void)
 {
@@ -896,6 +933,21 @@ static struct machine_desc * __init setup_machine_tags(unsigned int nr)
 }
 
 
+void __init hyp_mode_check(void)
+{
+#ifdef CONFIG_ARM_VIRT_EXT
+	if (is_hyp_mode_available()) {
+		pr_info("CPU: All CPU(s) started in HYP mode.\n");
+		pr_info("CPU: Virtualization extensions available.\n");
+	} else if (is_hyp_mode_mismatched()) {
+		pr_warn("CPU: WARNING: CPU(s) started in wrong/inconsistent modes (primary CPU mode 0x%x)\n",
+			__boot_cpu_mode & MODE_MASK);
+		pr_warn("CPU: This may indicate a broken bootloader or firmware.\n");
+	} else
+		pr_info("CPU: All CPU(s) started in SVC mode.\n");
+#endif
+}
+
 void __init setup_arch(char **cmdline_p)
 {
 	struct machine_desc *mdesc;
@@ -912,8 +964,9 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_DMA_CMA
 	setup_dma_zone(mdesc);
 #endif
-	if (mdesc->soft_reboot)
-		reboot_setup("s");
+
+	if (mdesc->reboot_mode != REBOOT_HARD)
+		reboot_mode = mdesc->reboot_mode;
 
 	init_mm.start_code = (unsigned long) _text;
 	init_mm.end_code   = (unsigned long) _etext;
@@ -936,10 +989,16 @@ void __init setup_arch(char **cmdline_p)
 
 #ifdef CONFIG_SMP
 	if (is_smp()) {
-		smp_set_ops(mdesc->smp);
+		if (!mdesc->smp_init || !mdesc->smp_init()) {
+				smp_set_ops(mdesc->smp);
+		}
 		smp_init_cpus();
 	}
 #endif
+
+	if (!is_smp())
+		hyp_mode_check();
+
 	reserve_crashkernel();
 
 	cpu_init();
@@ -962,7 +1021,6 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;
 #endif
 #endif
-	early_trap_init();
 
 	if (mdesc->init_early)
 		mdesc->init_early();

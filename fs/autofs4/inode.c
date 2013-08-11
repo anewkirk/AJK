@@ -100,7 +100,7 @@ static int autofs4_show_options(struct seq_file *m, struct dentry *root)
 
 static void autofs4_evict_inode(struct inode *inode)
 {
-	end_writeback(inode);
+	clear_inode(inode);
 	kfree(inode->i_private);
 }
 
@@ -244,12 +244,9 @@ int autofs4_fill_super(struct super_block *s, void *data, int silent)
 	if (!ino)
 		goto fail_free;
 	root_inode = autofs4_get_inode(s, S_IFDIR | 0755);
-	if (!root_inode)
-		goto fail_ino;
-
-	root = d_alloc_root(root_inode);
+	root = d_make_root(root_inode);
 	if (!root)
-		goto fail_iput;
+		goto fail_ino;
 	pipe = NULL;
 
 	root->d_fsdata = ino;
@@ -314,9 +311,6 @@ fail_fput:
 fail_dput:
 	dput(root);
 	goto fail_free;
-fail_iput:
-	printk("autofs: get root dentry failed\n");
-	iput(root_inode);
 fail_ino:
 	kfree(ino);
 fail_free:

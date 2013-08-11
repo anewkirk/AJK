@@ -14,6 +14,7 @@
 #include <linux/cpu.h>
 #include <linux/sysfs.h>
 #include <linux/cpufreq.h>
+#include <linux/module.h>
 #include <linux/jiffies.h>
 #include <linux/percpu.h>
 #include <linux/kobject.h>
@@ -36,7 +37,7 @@ struct cpufreq_stats {
 	unsigned int max_state;
 	unsigned int state_num;
 	unsigned int last_index;
-	cputime64_t *time_in_state;
+	u64 *time_in_state;
 	unsigned int *freq_table;
 #ifdef CONFIG_CPU_FREQ_STAT_DETAILS
 	unsigned int *trans_table;
@@ -169,11 +170,13 @@ static int freq_table_get_index(struct cpufreq_stats *stat, unsigned int freq)
 static void cpufreq_stats_free_table(unsigned int cpu)
 {
 	struct cpufreq_stats *stat = per_cpu(cpufreq_stats_table, cpu);
+
 	if (stat) {
+		pr_debug("%s: Free stat table\n", __func__);
 		kfree(stat->time_in_state);
 		kfree(stat);
+		per_cpu(cpufreq_stats_table, cpu) = NULL;
 	}
-	per_cpu(cpufreq_stats_table, cpu) = NULL;
 }
 
 /* must be called early in the CPU removal sequence (before
@@ -182,8 +185,10 @@ static void cpufreq_stats_free_table(unsigned int cpu)
 static void cpufreq_stats_free_sysfs(unsigned int cpu)
 {
 	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
-	if (policy && policy->cpu == cpu)
+	if (policy && (cpumask_weight(policy->cpus) == 1)) {
+		pr_debug("%s: Free sysfs stat\n", __func__);
 		sysfs_remove_group(&policy->kobj, &stats_attr_group);
+	}
 	if (policy)
 		cpufreq_cpu_put(policy);
 }
@@ -196,8 +201,10 @@ static int cpufreq_stats_create_table(struct cpufreq_policy *policy,
 	struct cpufreq_policy *data;
 	unsigned int alloc_size;
 	unsigned int cpu = policy->cpu;
+
 	if (per_cpu(cpufreq_stats_table, cpu))
-		return -EBUSY;
+		return 0;
+
 	stat = kzalloc(sizeof(struct cpufreq_stats), GFP_KERNEL);
 	if ((stat) == NULL)
 		return -ENOMEM;
@@ -222,7 +229,7 @@ static int cpufreq_stats_create_table(struct cpufreq_policy *policy,
 		count++;
 	}
 
-	alloc_size = count * sizeof(int) + count * sizeof(cputime64_t);
+	alloc_size = count * sizeof(int) + count * sizeof(u64);
 
 #ifdef CONFIG_CPU_FREQ_STAT_DETAILS
 	alloc_size += count * count * sizeof(int);
@@ -261,6 +268,19 @@ error_get_fail:
 	return ret;
 }
 
+static void cpufreq_stats_update_policy_cpu(struct cpufreq_policy *policy)
+{
+	struct cpufreq_stats *stat = per_cpu(cpufreq_stats_table,
+			policy->last_cpu);
+
+	pr_debug("Updating stats_table for new_cpu %u from last_cpu %u\n",
+			policy->cpu, policy->last_cpu);
+	per_cpu(cpufreq_stats_table, policy->cpu) = per_cpu(cpufreq_stats_table,
+			policy->last_cpu);
+	per_cpu(cpufreq_stats_table, policy->last_cpu) = NULL;
+	stat->cpu = policy->cpu;
+}
+
 static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 		unsigned long val, void *data)
 {
@@ -268,6 +288,12 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 	struct cpufreq_policy *policy = data;
 	struct cpufreq_frequency_table *table;
 	unsigned int cpu = policy->cpu;
+
+	if (val == CPUFREQ_UPDATE_POLICY_CPU) {
+		cpufreq_stats_update_policy_cpu(policy);
+		return 0;
+	}
+
 	if (val != CPUFREQ_NOTIFY)
 		return 0;
 	table = cpufreq_frequency_get_table(cpu);
@@ -275,7 +301,7 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 		return 0;
 	ret = cpufreq_stats_create_table(policy, table);
 	if (ret)
-		return ret;
+		pr_debug("%s: create table failed, ret=%d\n", __func__, ret);
 	return 0;
 }
 
@@ -344,15 +370,16 @@ static int __cpuinit cpufreq_stat_cpu_callback(struct notifier_block *nfb,
 
 	switch (action) {
 	case CPU_ONLINE:
-	case CPU_ONLINE_FROZEN:
 		cpufreq_update_policy(cpu);
 		break;
 	case CPU_DOWN_PREPARE:
-	case CPU_DOWN_PREPARE_FROZEN:
 		cpufreq_stats_free_sysfs(cpu);
 		break;
 	case CPU_DEAD:
-	case CPU_DEAD_FROZEN:
+		cpufreq_stats_free_table(cpu);
+		break;
+	case CPU_UP_CANCELED_FROZEN:
+		cpufreq_stats_free_sysfs(cpu);
 		cpufreq_stats_free_table(cpu);
 		break;
 	case CPU_DOWN_FAILED:

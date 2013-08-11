@@ -85,7 +85,7 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
-int vm_dirty_ratio = 15;
+int vm_dirty_ratio = 20;
 
 /*
  * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
@@ -103,7 +103,7 @@ EXPORT_SYMBOL_GPL(dirty_writeback_interval);
 /*
  * The longest time for which data is allowed to remain dirty
  */
-unsigned int dirty_expire_interval = 30 * 100; /* centiseconds */
+unsigned int dirty_expire_interval = 10 * 100; /* centiseconds */
 
 /*
  * Flag that makes the machine dump writes/reads and block dirtyings.
@@ -1642,12 +1642,14 @@ static struct notifier_block __cpuinitdata ratelimit_nb = {
 
 static void dirty_early_suspend(struct early_suspend *handler)
 {
-	dirty_writeback_interval = 15 * 100;
+	dirty_writeback_interval = 10 * 1000;
+	dirty_expire_interval = 10 * 1000;
 }
 
 static void dirty_late_resume(struct early_suspend *handler)
 {
 	dirty_writeback_interval = 5 * 100;
+	dirty_expire_interval = 10 * 100;
 }
 
 static struct early_suspend dirty_suspend = {
@@ -2329,10 +2331,6 @@ void wait_for_stable_page(struct page *page)
 
 	if (!bdi_cap_stable_pages_required(bdi))
 		return;
-#ifdef CONFIG_NEED_BOUNCE_POOL
-	if (mapping->host->i_sb->s_flags & MS_SNAP_STABLE)
-		return;
-#endif /* CONFIG_NEED_BOUNCE_POOL */
 
 	wait_on_page_writeback(page);
 }

@@ -158,6 +158,8 @@ _mali_osk_errcode_t _ump_ukk_allocate( _ump_uk_allocate_s *user_interaction )
 		 new_allocation->is_cached = 0;
 	else new_allocation->is_cached = 1;
 
+	new_allocation->backend_info = (void*)user_interaction->constraints;
+
 	/* special case a size of 0, we should try to emulate what malloc does in this case, which is to return a valid pointer that must be freed, but can't be dereferences */
 	if (0 == user_interaction->size)
 	{
@@ -257,4 +259,3 @@ UMP_KERNEL_API_EXPORT ump_dd_handle ump_dd_handle_get_from_vaddr(unsigned long v
 
 	return (ump_dd_handle)mem;
 }
-

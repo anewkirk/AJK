@@ -22,6 +22,7 @@
 #include <linux/iocontext.h>
 #include <linux/ioprio.h>
 #include <linux/freezer.h>
+#include <linux/aio.h>
 
 MODULE_ALIAS_MISCDEV(FUSE_MINOR);
 MODULE_ALIAS("devname:fuse");
@@ -1296,7 +1297,7 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 		page_nr++;
 		ret += buf->len;
 
-		if (pipe->inode)
+		if (pipe->files)
 			do_wakeup = 1;
 	}
 

@@ -70,8 +70,14 @@ static int ceph_statfs(struct dentry *dentry, struct kstatfs *buf)
 	/*
 	 * express utilization in terms of large blocks to avoid
 	 * overflow on 32-bit machines.
+	 *
+	 * NOTE: for the time being, we make bsize == frsize to humor
+	 * not-yet-ancient versions of glibc that are broken.
+	 * Someday, we will probably want to report a real block
+	 * size...  whatever that may mean for a network file system!
 	 */
 	buf->f_bsize = 1 << CEPH_BLOCK_SHIFT;
+	buf->f_frsize = 1 << CEPH_BLOCK_SHIFT;
 	buf->f_blocks = le64_to_cpu(st.kb) >> (CEPH_BLOCK_SHIFT-10);
 	buf->f_bfree = (le64_to_cpu(st.kb) - le64_to_cpu(st.kb_used)) >>
 		(CEPH_BLOCK_SHIFT-10);
@@ -80,7 +86,6 @@ static int ceph_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_files = le64_to_cpu(st.num_objects);
 	buf->f_ffree = -1;
 	buf->f_namelen = NAME_MAX;
-	buf->f_frsize = PAGE_CACHE_SIZE;
 
 	/* leave fsid little-endian, regardless of host endianness */
 	fsid = *(u64 *)(&monmap->fsid) ^ *((u64 *)&monmap->fsid + 1);
@@ -627,12 +632,26 @@ static struct dentry *open_root_dentry(struct ceph_fs_client *fsc,
 	err = ceph_mdsc_do_request(mdsc, NULL, req);
 	if (err == 0) {
 		dout("open_root_inode success\n");
+<<<<<<< HEAD
 		if (ceph_ino(req->r_target_inode) == CEPH_INO_ROOT &&
 		    fsc->sb->s_root == NULL)
 			root = d_alloc_root(req->r_target_inode);
 		else
 			root = d_obtain_alias(req->r_target_inode);
 		req->r_target_inode = NULL;
+=======
+		if (ceph_ino(inode) == CEPH_INO_ROOT &&
+		    fsc->sb->s_root == NULL) {
+			root = d_make_root(inode);
+			if (!root) {
+				root = ERR_PTR(-ENOMEM);
+				goto out;
+			}
+		} else {
+			root = d_obtain_alias(inode);
+		}
+		ceph_init_dentry(root);
+>>>>>>> 48fde70... switch open-coded instances of d_make_root() to new helper
 		dout("open_root_inode success, root dentry is %p\n", root);
 	} else {
 		root = ERR_PTR(err);

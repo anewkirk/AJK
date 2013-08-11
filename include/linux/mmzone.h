@@ -15,8 +15,7 @@
 #include <linux/seqlock.h>
 #include <linux/nodemask.h>
 #include <linux/pageblock-flags.h>
-#include <linux/timer.h>
-#include <generated/bounds.h>
+#include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
 #include <asm/page.h>
 
@@ -156,6 +155,9 @@ enum zone_stat_item {
 #endif
 	NR_ANON_TRANSPARENT_HUGEPAGES,
 	NR_FREE_CMA_PAGES,
+#ifdef CONFIG_UKSM
+	NR_UKSM_ZERO_PAGES,
+#endif
 	NR_VM_ZONE_STAT_ITEMS };
 
 /*
@@ -223,7 +225,6 @@ struct lruvec {
 /* Mask used at gathering information at once (see memcontrol.c) */
 #define LRU_ALL_FILE (BIT(LRU_INACTIVE_FILE) | BIT(LRU_ACTIVE_FILE))
 #define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON))
-#define LRU_ALL_EVICTABLE (LRU_ALL_FILE | LRU_ALL_ANON)
 #define LRU_ALL	     ((1 << NR_LRU_LISTS) - 1)
 
 /* Isolate clean file */
@@ -242,14 +243,12 @@ enum zone_watermarks {
 	WMARK_MIN,
 	WMARK_LOW,
 	WMARK_HIGH,
-	WMARK_LOTS,
 	NR_WMARK
 };
 
 #define min_wmark_pages(z) (z->watermark[WMARK_MIN])
 #define low_wmark_pages(z) (z->watermark[WMARK_LOW])
 #define high_wmark_pages(z) (z->watermark[WMARK_HIGH])
-#define lots_wmark_pages(z) (z->watermark[WMARK_LOTS])
 
 struct per_cpu_pages {
 	int count;		/* number of pages in the list */
@@ -325,24 +324,6 @@ enum zone_type {
 };
 
 #ifndef __GENERATING_BOUNDS_H
-
-/*
- * When a memory allocation must conform to specific limitations (such
- * as being suitable for DMA) the caller will pass in hints to the
- * allocator in the gfp_mask, in the zone modifier bits.  These bits
- * are used to select a priority ordered list of memory zones which
- * match the requested limits. See gfp_zone() in include/linux/gfp.h
- */
-
-#if MAX_NR_ZONES < 2
-#define ZONES_SHIFT 0
-#elif MAX_NR_ZONES <= 2
-#define ZONES_SHIFT 1
-#elif MAX_NR_ZONES <= 4
-#define ZONES_SHIFT 2
-#else
-#error ZONES_SHIFT -- too many zones configured adjust calculation
-#endif
 
 struct zone {
 	/* Fields commonly accessed by the page allocator */
@@ -484,7 +465,7 @@ struct zone {
 	 *
 	 * present_pages is physical pages existing within the zone, which
 	 * is calculated as:
-	 *	present_pages = spanned_pages - absent_pages(pags in holes);
+	 *	present_pages = spanned_pages - absent_pages(pages in holes);
 	 *
 	 * managed_pages is present pages managed by the buddy system, which
 	 * is calculated as (reserved_pages includes pages allocated by the
@@ -764,7 +745,6 @@ typedef struct pglist_data {
 	wait_queue_head_t pfmemalloc_wait;
 	struct task_struct *kswapd;	/* Protected by lock_memory_hotplug() */
 	int kswapd_max_order;
-	struct timer_list watermark_timer;
 	enum zone_type classzone_idx;
 #ifdef CONFIG_NUMA_BALANCING
 	/*
@@ -1098,8 +1078,6 @@ static inline unsigned long early_pfn_to_nid(unsigned long pfn)
  * PA_SECTION_SHIFT		physical address to/from section number
  * PFN_SECTION_SHIFT		pfn to/from section number
  */
-#define SECTIONS_SHIFT		(MAX_PHYSMEM_BITS - SECTION_SIZE_BITS)
-
 #define PA_SECTION_SHIFT	(SECTION_SIZE_BITS)
 #define PFN_SECTION_SHIFT	(SECTION_SIZE_BITS - PAGE_SHIFT)
 

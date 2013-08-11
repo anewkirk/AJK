@@ -31,6 +31,7 @@
 #include <linux/mpage.h>
 #include <linux/fiemap.h>
 #include <linux/namei.h>
+#include <linux/aio.h>
 #include "ext2.h"
 #include "acl.h"
 #include "xip.h"
@@ -92,7 +93,7 @@ void ext2_evict_inode(struct inode * inode)
 	}
 
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 
 	ext2_discard_reservation(inode);
 	rsv = EXT2_I(inode)->i_block_alloc_info;

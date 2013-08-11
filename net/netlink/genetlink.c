@@ -134,6 +134,7 @@ int genl_register_mc_group(struct genl_family *family,
 	int err = 0;
 
 	BUG_ON(grp->name[0] == '\0');
+	BUG_ON(memchr(grp->name, '\0', GENL_NAMSIZ) == NULL);
 
 	genl_lock();
 
@@ -516,7 +517,7 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		return -EOPNOTSUPP;
 
 	if ((ops->flags & GENL_ADMIN_PERM) &&
-	    security_netlink_recv(skb, CAP_NET_ADMIN))
+	    !capable(CAP_NET_ADMIN))
 		return -EPERM;
 
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {

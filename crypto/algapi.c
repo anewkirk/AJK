@@ -470,7 +470,7 @@ EXPORT_SYMBOL_GPL(crypto_register_template);
 void crypto_unregister_template(struct crypto_template *tmpl)
 {
 	struct crypto_instance *inst;
-	struct hlist_node *p, *n;
+	struct hlist_node *n;
 	struct hlist_head *list;
 	LIST_HEAD(users);
 
@@ -480,7 +480,7 @@ void crypto_unregister_template(struct crypto_template *tmpl)
 	list_del_init(&tmpl->list);
 
 	list = &tmpl->instances;
-	hlist_for_each_entry(inst, p, list, list) {
+	hlist_for_each_entry(inst, list, list) {
 		int err = crypto_remove_alg(&inst->alg, &users);
 		BUG_ON(err);
 	}
@@ -489,7 +489,7 @@ void crypto_unregister_template(struct crypto_template *tmpl)
 
 	up_write(&crypto_alg_sem);
 
-	hlist_for_each_entry_safe(inst, p, n, list, list) {
+	hlist_for_each_entry_safe(inst, n, list, list) {
 		BUG_ON(atomic_read(&inst->alg.cra_refcnt) != 1);
 		tmpl->free(inst);
 	}
@@ -525,7 +525,8 @@ struct crypto_template *crypto_lookup_template(const char *name)
 		return -EACCES;
 	}
 #endif
-	return try_then_request_module(__crypto_lookup_template(name), name);
+	return try_then_request_module(__crypto_lookup_template(name), "%s",
+				       name);
 }
 EXPORT_SYMBOL_GPL(crypto_lookup_template);
 

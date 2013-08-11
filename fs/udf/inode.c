@@ -37,6 +37,8 @@
 #include <linux/writeback.h>
 #include <linux/slab.h>
 #include <linux/crc-itu-t.h>
+#include <linux/mpage.h>
+#include <linux/aio.h>
 
 #include "udf_i.h"
 #include "udf_sb.h"
@@ -79,7 +81,7 @@ void udf_evict_inode(struct inode *inode)
 	} else
 		truncate_inode_pages(&inode->i_data, 0);
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 	if (iinfo->i_alloc_type != ICBTAG_FLAG_AD_IN_ICB &&
 	    inode->i_size != iinfo->i_lenExtents) {
 		printk(KERN_WARNING "UDF-fs (%s): Inode %lu (mode %o) has "

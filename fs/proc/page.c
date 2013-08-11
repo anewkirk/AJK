@@ -8,7 +8,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/hugetlb.h>
-#include <linux/kernel-page-flags.h>
+#include <uapi/linux/kernel-page-flags.h>
 #include <asm/uaccess.h>
 #include "internal.h"
 
@@ -95,7 +95,7 @@ u64 stable_page_flags(struct page *page)
 	/*
 	 * pseudo flags for the well known (anonymous) memory mapped pages
 	 *
-	 * Note that page->_mapcount is overloaded in SLOB/SLUB/SLQB, so the
+	 * Note that page->_mapcount is overloaded in SLOB/SLUB, so the
 	 * simple test in page_mapped() is not enough.
 	 */
 	if (!PageSlab(page) && page_mapped(page))
@@ -115,10 +115,18 @@ u64 stable_page_flags(struct page *page)
 		u |= 1 << KPF_COMPOUND_TAIL;
 	if (PageHuge(page))
 		u |= 1 << KPF_HUGE;
+	/*
+	 * PageTransCompound can be true for non-huge compound pages (slab
+	 * pages or pages allocated by drivers with __GFP_COMP) because it
+	 * just checks PG_head/PG_tail, so we need to check PageLRU to make
+	 * sure a given page is a thp, not a non-huge compound page.
+	 */
+	else if (PageTransCompound(page) && PageLRU(compound_trans_head(page)))
+		u |= 1 << KPF_THP;
 
 	/*
 	 * Caveats on high order pages: page->_count will only be set
-	 * -1 on the head page; SLUB/SLQB do the same for PG_slab;
+	 * -1 on the head page; SLUB do the same for PG_slab;
 	 * SLOB won't set PG_slab at all on compound pages.
 	 */
 	if (PageBuddy(page))

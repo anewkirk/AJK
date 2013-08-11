@@ -17,11 +17,12 @@
 /*
  * See Documentation/block/deadline-iosched.txt
  */
-static const int read_expire = 1000;	/* max time before a read is submitted. */
-static const int write_expire = 5000;	/* ditto for writes, these limits are SOFT! */
-static const int writes_starved = 1;	/* max times reads can starve a write */
-static const int fifo_batch = 1;	/* # of sequential requests treated as one
-					  by the above parameters. For throughput. */
+static const int read_expire = HZ / 4;  /* max time before a read is submitted. */
+static const int write_expire = 3 * HZ; /* ditto for writes, these limits are SOFT! */
+static const int writes_starved = 2;    /* max times reads can starve a write */
+static const int fifo_batch = 1;       /* # of sequential requests treated as one
+				     by the above parameters. For throughput. */
+static const int front_merges = 1;
 
 struct deadline_data {
 	/*
@@ -132,7 +133,7 @@ deadline_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	 * check for front merge
 	 */
 	if (dd->front_merges) {
-		sector_t sector = bio->bi_sector + bio_sectors(bio);
+		sector_t sector = bio_end_sector(bio);
 
 		__rq = elv_rb_find(&dd->sort_list[bio_data_dir(bio)], sector);
 		if (__rq) {
@@ -230,7 +231,7 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
 	/*
 	 * rq is expired!
 	 */
-	if (time_after(jiffies, rq_fifo_time(rq)))
+	if (time_after_eq(jiffies, rq_fifo_time(rq)))
 		return 1;
 
 	return 0;
@@ -337,13 +338,21 @@ static void deadline_exit_queue(struct elevator_queue *e)
 /*
  * initialize elevator private data (deadline_data).
  */
-static void *deadline_init_queue(struct request_queue *q)
+static int deadline_init_queue(struct request_queue *q, struct elevator_type *e)
 {
 	struct deadline_data *dd;
+	struct elevator_queue *eq;
+
+	eq = elevator_alloc(q, e);
+	if (!eq)
+		return -ENOMEM;
 
 	dd = kmalloc_node(sizeof(*dd), GFP_KERNEL | __GFP_ZERO, q->node);
-	if (!dd)
-		return NULL;
+	if (!dd) {
+		kobject_put(&eq->kobj);
+		return -ENOMEM;
+	}
+	eq->elevator_data = dd;
 
 	INIT_LIST_HEAD(&dd->fifo_list[READ]);
 	INIT_LIST_HEAD(&dd->fifo_list[WRITE]);
@@ -352,9 +361,13 @@ static void *deadline_init_queue(struct request_queue *q)
 	dd->fifo_expire[READ] = read_expire;
 	dd->fifo_expire[WRITE] = write_expire;
 	dd->writes_starved = writes_starved;
-	dd->front_merges = 0;
+	dd->front_merges = front_merges;
 	dd->fifo_batch = fifo_batch;
-	return dd;
+
+	spin_lock_irq(q->queue_lock);
+	q->elevator = eq;
+	spin_unlock_irq(q->queue_lock);
+	return 0;
 }
 
 /*

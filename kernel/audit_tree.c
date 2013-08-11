@@ -249,7 +249,7 @@ static void untag_chunk(struct node *p)
 		list_del_rcu(&chunk->hash);
 		spin_unlock(&hash_lock);
 		spin_unlock(&entry->lock);
-		fsnotify_destroy_mark(entry);
+		fsnotify_destroy_mark(entry, audit_tree_group);
 		goto out;
 	}
 
@@ -291,7 +291,8 @@ static void untag_chunk(struct node *p)
 		owner->root = new;
 	spin_unlock(&hash_lock);
 	spin_unlock(&entry->lock);
-	fsnotify_destroy_mark(entry);
+	fsnotify_destroy_mark(entry, audit_tree_group);
+	fsnotify_put_mark(&new->mark);	/* drop initial reference */
 	goto out;
 
 Fallback:
@@ -330,8 +331,7 @@ static int create_chunk(struct inode *inode, struct audit_tree *tree)
 		spin_unlock(&hash_lock);
 		chunk->dead = 1;
 		spin_unlock(&entry->lock);
-		fsnotify_get_mark(entry);
-		fsnotify_destroy_mark(entry);
+		fsnotify_destroy_mark(entry, audit_tree_group);
 		fsnotify_put_mark(entry);
 		return 0;
 	}
@@ -411,8 +411,7 @@ static int tag_chunk(struct inode *inode, struct audit_tree *tree)
 		spin_unlock(&chunk_entry->lock);
 		spin_unlock(&old_entry->lock);
 
-		fsnotify_get_mark(chunk_entry);
-		fsnotify_destroy_mark(chunk_entry);
+		fsnotify_destroy_mark(chunk_entry, audit_tree_group);
 
 		fsnotify_put_mark(chunk_entry);
 		fsnotify_put_mark(old_entry);
@@ -443,7 +442,8 @@ static int tag_chunk(struct inode *inode, struct audit_tree *tree)
 	spin_unlock(&hash_lock);
 	spin_unlock(&chunk_entry->lock);
 	spin_unlock(&old_entry->lock);
-	fsnotify_destroy_mark(old_entry);
+	fsnotify_destroy_mark(old_entry, audit_tree_group);
+	fsnotify_put_mark(chunk_entry);	/* drop initial reference */
 	fsnotify_put_mark(old_entry); /* pair to fsnotify_find mark_entry */
 	return 0;
 }
@@ -594,7 +594,7 @@ void audit_trim_trees(void)
 
 		root_mnt = collect_mounts(&path);
 		path_put(&path);
-		if (!root_mnt)
+		if (IS_ERR(root_mnt))
 			goto skip_it;
 
 		spin_lock(&hash_lock);
@@ -608,9 +608,9 @@ void audit_trim_trees(void)
 		}
 		spin_unlock(&hash_lock);
 		trim_marked(tree);
-		put_tree(tree);
 		drop_collected_mounts(root_mnt);
 skip_it:
+		put_tree(tree);
 		mutex_lock(&audit_filter_mutex);
 	}
 	list_del(&cursor);
@@ -668,8 +668,8 @@ int audit_add_tree_rule(struct audit_krule *rule)
 		goto Err;
 	mnt = collect_mounts(&path);
 	path_put(&path);
-	if (!mnt) {
-		err = -ENOMEM;
+	if (IS_ERR(mnt)) {
+		err = PTR_ERR(mnt);
 		goto Err;
 	}
 
@@ -718,8 +718,8 @@ int audit_tag_tree(char *old, char *new)
 		return err;
 	tagged = collect_mounts(&path2);
 	path_put(&path2);
-	if (!tagged)
-		return -ENOMEM;
+	if (IS_ERR(tagged))
+		return PTR_ERR(tagged);
 
 	err = kern_path(old, 0, &path1);
 	if (err) {

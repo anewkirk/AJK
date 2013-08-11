@@ -53,10 +53,14 @@ static struct macvlan_dev *macvlan_hash_lookup(const struct macvlan_port *port,
 					       const unsigned char *addr)
 {
 	struct macvlan_dev *vlan;
-	struct hlist_node *n;
 
+<<<<<<< HEAD
 	hlist_for_each_entry_rcu(vlan, n, &port->vlan_hash[addr[5]], hlist) {
 		if (!compare_ether_addr_64bits(vlan->dev->dev_addr, addr))
+=======
+	hlist_for_each_entry_rcu(vlan, &port->vlan_hash[addr[5]], hlist) {
+		if (ether_addr_equal_64bits(vlan->dev->dev_addr, addr))
+>>>>>>> b67bfe0... hlist: drop the node parameter from iterators
 			return vlan;
 	}
 	return NULL;
@@ -133,7 +137,6 @@ static void macvlan_broadcast(struct sk_buff *skb,
 {
 	const struct ethhdr *eth = eth_hdr(skb);
 	const struct macvlan_dev *vlan;
-	struct hlist_node *n;
 	struct sk_buff *nskb;
 	unsigned int i;
 	int err;
@@ -142,7 +145,7 @@ static void macvlan_broadcast(struct sk_buff *skb,
 		return;
 
 	for (i = 0; i < MACVLAN_HASH_SIZE; i++) {
-		hlist_for_each_entry_rcu(vlan, n, &port->vlan_hash[i], hlist) {
+		hlist_for_each_entry_rcu(vlan, &port->vlan_hash[i], hlist) {
 			if (vlan->dev == src || !(vlan->mode & mode))
 				continue;
 
@@ -193,7 +196,8 @@ static rx_handler_result_t macvlan_handle_frame(struct sk_buff **pskb)
 	}
 
 	if (port->passthru)
-		vlan = list_first_entry(&port->vlans, struct macvlan_dev, list);
+		vlan = list_first_or_null_rcu(&port->vlans,
+					      struct macvlan_dev, list);
 	else
 		vlan = macvlan_hash_lookup(port, eth->h_dest);
 	if (vlan == NULL)
@@ -687,7 +691,7 @@ int macvlan_common_newlink(struct net *src_net, struct net_device *dev,
 	if (err < 0)
 		goto destroy_port;
 
-	list_add_tail(&vlan->list, &port->vlans);
+	list_add_tail_rcu(&vlan->list, &port->vlans);
 	netif_stacked_transfer_operstate(lowerdev, dev);
 
 	return 0;
@@ -713,7 +717,7 @@ void macvlan_dellink(struct net_device *dev, struct list_head *head)
 {
 	struct macvlan_dev *vlan = netdev_priv(dev);
 
-	list_del(&vlan->list);
+	list_del_rcu(&vlan->list);
 	unregister_netdevice_queue(dev, head);
 }
 EXPORT_SYMBOL_GPL(macvlan_dellink);

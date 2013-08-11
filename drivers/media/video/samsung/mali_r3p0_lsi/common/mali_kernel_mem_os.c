@@ -39,8 +39,7 @@ typedef struct os_allocator
 	u32 cpu_usage_adjust;
 } os_allocator;
 
-static mali_physical_memory_allocation_result os_allocator_allocate(void* ctx, mali_allocation_engine * engine,
-				mali_memory_allocation * descriptor, u32* offset, mali_physical_memory_allocation * alloc_info);
+static mali_physical_memory_allocation_result os_allocator_allocate(void* ctx, mali_allocation_engine * engine,  mali_memory_allocation * descriptor, u32* offset, mali_physical_memory_allocation * alloc_info);
 static mali_physical_memory_allocation_result os_allocator_allocate_page_table_block(void * ctx, mali_page_table_block * block);
 static void os_allocator_release(void * ctx, void * handle);
 static void os_allocator_page_table_block_release( mali_page_table_block *page_table_block );
@@ -75,7 +74,7 @@ mali_physical_memory_allocator * mali_os_allocator_create(u32 max_allocation, u3
 
 			    return allocator;
             }
-            	_mali_osk_free(info);
+            _mali_osk_free(info);
 		}
 		_mali_osk_free(allocator);
 	}
@@ -129,7 +128,8 @@ static mali_physical_memory_allocation_result os_allocator_allocate(void* ctx, m
 		allocation->num_pages = ((left + _MALI_OSK_CPU_PAGE_SIZE - 1) & ~(_MALI_OSK_CPU_PAGE_SIZE - 1)) >> _MALI_OSK_CPU_PAGE_ORDER;
 		MALI_DEBUG_PRINT(6, ("Allocating page array of size %d bytes\n", allocation->num_pages * sizeof(struct page*)));
 
-		while (left > 0) {
+		while (left > 0)
+		{
 			err = mali_allocation_engine_map_physical(engine, descriptor, *offset, MALI_MEMORY_ALLOCATION_OS_ALLOCATED_PHYSADDR_MAGIC, info->cpu_usage_adjust, _MALI_OSK_CPU_PAGE_SIZE);
 			if ( _MALI_OSK_ERR_OK != err) {
 				if (  _MALI_OSK_ERR_NOMEM == err) {
@@ -169,12 +169,11 @@ static mali_physical_memory_allocation_result os_allocator_allocate(void* ctx, m
 			if (left) result = MALI_MEM_ALLOC_PARTIAL;
 			else result = MALI_MEM_ALLOC_FINISHED;
 
-		       /* Some OS do not perform a full cache flush (including all outer caches) for uncached mapped memory.
-			* They zero the memory through a cached mapping, then flush the inner caches but not the outer caches.
-			* This is required for MALI to have the correct view of the memory.
-			*/
-			_mali_osk_cache_ensure_uncached_range_flushed( (void *)descriptor,
-				allocation->offset_start, pages_allocated *_MALI_OSK_CPU_PAGE_SIZE );
+            /* Some OS do not perform a full cache flush (including all outer caches) for uncached mapped memory.
+             * They zero the memory through a cached mapping, then flush the inner caches but not the outer caches.
+             * This is required for MALI to have the correct view of the memory.
+             */
+            _mali_osk_cache_ensure_uncached_range_flushed( (void *)descriptor, allocation->offset_start, pages_allocated *_MALI_OSK_CPU_PAGE_SIZE );
 			allocation->num_pages = pages_allocated;
 			allocation->engine = engine;         /* Necessary to make the engine's unmap call */
 			allocation->descriptor = descriptor; /* Necessary to make the engine's unmap call */
@@ -224,8 +223,7 @@ static void os_allocator_release(void * ctx, void * handle)
 	MALI_DEBUG_ASSERT( allocation->num_pages <= info->num_pages_allocated);
 	info->num_pages_allocated -= allocation->num_pages;
 
-	mali_allocation_engine_unmap_physical( engine, descriptor, allocation->offset_start,
-			_MALI_OSK_CPU_PAGE_SIZE*allocation->num_pages, _MALI_OSK_MEM_MAPREGION_FLAG_OS_ALLOCATED_PHYSADDR );
+	mali_allocation_engine_unmap_physical( engine, descriptor, allocation->offset_start, _MALI_OSK_CPU_PAGE_SIZE*allocation->num_pages, _MALI_OSK_MEM_MAPREGION_FLAG_OS_ALLOCATED_PHYSADDR );
 
 	_mali_osk_lock_signal(info->mutex, _MALI_OSK_LOCKMODE_RW);
 
@@ -234,11 +232,7 @@ static void os_allocator_release(void * ctx, void * handle)
 
 static mali_physical_memory_allocation_result os_allocator_allocate_page_table_block(void * ctx, mali_page_table_block * block)
 {
-#ifdef CONFIG_CPU_EXYNOS4210
-	int allocation_order = 6; /* _MALI_OSK_CPU_PAGE_SIZE << 6 */
-#else
 	int allocation_order = 11; /* _MALI_OSK_CPU_PAGE_SIZE << 11 */
-#endif
 	void *virt = NULL;
 	u32 size = _MALI_OSK_CPU_PAGE_SIZE << allocation_order;
 	os_allocator * info;

@@ -20,6 +20,7 @@
 #include <linux/buffer_head.h>
 #include <linux/exportfs.h>
 #include <linux/mount.h>
+#include <linux/aio.h>
 #include <linux/vfs.h>
 #include <linux/parser.h>
 #include <linux/uio.h>
@@ -372,12 +373,11 @@ struct inode *fat_iget(struct super_block *sb, loff_t i_pos)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	struct hlist_head *head = sbi->inode_hashtable + fat_hash(i_pos);
-	struct hlist_node *_p;
 	struct msdos_inode_info *i;
 	struct inode *inode = NULL;
 
 	spin_lock(&sbi->inode_hash_lock);
-	hlist_for_each_entry(i, _p, head, i_fat_hash) {
+	hlist_for_each_entry(i, head, i_fat_hash) {
 		BUG_ON(i->vfs_inode.i_sb != sb);
 		if (i->i_pos != i_pos)
 			continue;
@@ -519,7 +519,7 @@ static void fat_evict_inode(struct inode *inode)
 		fat_truncate_blocks(inode, 0);
 	}
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 	fat_cache_inval_inode(inode);
 	fat_detach(inode);
 }
@@ -1301,6 +1301,19 @@ static int fat_read_root(struct inode *inode)
 	return 0;
 }
 
+static unsigned long calc_fat_clusters(struct super_block *sb)
+{
+	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+
+	/* Divide first to avoid overflow */
+	if (sbi->fat_bits != 12) {
+		unsigned long ent_per_sec = sb->s_blocksize * 8 / sbi->fat_bits;
+		return ent_per_sec * sbi->fat_length;
+	}
+
+	return sbi->fat_length * sb->s_blocksize * 8 / sbi->fat_bits;
+}
+
 /*
  * Read the super block of an MS-DOS FS.
  */
@@ -1506,7 +1519,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 		sbi->fat_bits = (total_clusters > MAX_FAT12) ? 16 : 12;
 
 	/* check that FAT table does not overflow */
-	fat_clusters = sbi->fat_length * sb->s_blocksize * 8 / sbi->fat_bits;
+	fat_clusters = calc_fat_clusters(sb);
 	total_clusters = min(total_clusters, fat_clusters - FAT_START_ENT);
 	if (total_clusters > MAX_FAT(sb)) {
 		if (!silent)

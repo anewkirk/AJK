@@ -7,7 +7,7 @@
 
 obj-y :=	open.o read_write.o file_table.o super.o \
 		char_dev.o stat.o exec.o pipe.o namei.o fcntl.o \
-		ioctl.o readdir.o select.o fifo.o dcache.o inode.o \
+		ioctl.o readdir.o select.o dcache.o inode.o \
 		attr.o bad_inode.o file.o filesystems.o namespace.o \
 		seq_file.o xattr.o libfs.o fs-writeback.o \
 		pnode.o drop_caches.o splice.o sync.o utimes.o \
@@ -18,6 +18,8 @@ obj-y +=	buffer.o bio.o block_dev.o direct-io.o mpage.o ioprio.o
 else
 obj-y +=	no-block.o
 endif
+
+obj-$(CONFIG_PROC_FS) += proc_namespace.o
 
 obj-$(CONFIG_BLK_DEV_INTEGRITY) += bio-integrity.o
 obj-y				+= notify/
@@ -47,13 +49,13 @@ obj-$(CONFIG_FS_MBCACHE)	+= mbcache.o
 obj-$(CONFIG_FS_POSIX_ACL)	+= posix_acl.o xattr_acl.o
 obj-$(CONFIG_NFS_COMMON)	+= nfs_common/
 obj-$(CONFIG_GENERIC_ACL)	+= generic_acl.o
+obj-$(CONFIG_COREDUMP)		+= coredump.o
 
 obj-$(CONFIG_FHANDLE)		+= fhandle.o
 
 obj-y				+= quota/
 
 obj-$(CONFIG_PROC_FS)		+= proc/
-obj-y				+= partitions/
 obj-$(CONFIG_SYSFS)		+= sysfs/
 obj-$(CONFIG_CONFIGFS_FS)	+= configfs/
 obj-y				+= devpts/
@@ -83,6 +85,7 @@ obj-$(CONFIG_ISO9660_FS)	+= isofs/
 obj-$(CONFIG_HFSPLUS_FS)	+= hfsplus/ # Before hfs to find wrapped HFS+
 obj-$(CONFIG_HFS_FS)		+= hfs/
 obj-$(CONFIG_ECRYPT_FS)		+= ecryptfs/
+obj-$(CONFIG_SDCARD_FS)		+= sdcardfs/
 obj-$(CONFIG_VXFS_FS)		+= freevxfs/
 obj-$(CONFIG_NFS_FS)		+= nfs/
 obj-$(CONFIG_EXPORTFS)		+= exportfs/
@@ -124,6 +127,9 @@ obj-$(CONFIG_GFS2_FS)           += gfs2/
 obj-$(CONFIG_EXOFS_FS)          += exofs/
 obj-$(CONFIG_CEPH_FS)		+= ceph/
 obj-$(CONFIG_PSTORE)		+= pstore/
+obj-$(CONFIG_F2FS_FS)		+= f2fs/
 
 # Patched by YAFFS
 obj-$(CONFIG_YAFFS_FS)		+= yaffs2/
+
+obj-$(CONFIG_DYNAMIC_FSYNC)	+= dyn_sync_cntrl.o

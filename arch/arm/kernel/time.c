@@ -24,12 +24,11 @@
 #include <linux/syscore_ops.h>
 #include <linux/timer.h>
 #include <linux/irq.h>
+#include <linux/sched_clock.h>
 
 #include <linux/mc146818rtc.h>
 
-#include <asm/leds.h>
 #include <asm/thread_info.h>
-#include <asm/sched_clock.h>
 #include <asm/stacktrace.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
@@ -75,7 +74,7 @@ EXPORT_SYMBOL(profile_pc);
 #endif
 
 #ifdef CONFIG_ARCH_USES_GETTIMEOFFSET
-u32 arch_gettimeoffset(void)
+static u32 arm_gettimeoffset(void)
 {
 	if (system_timer->offset != NULL)
 		return system_timer->offset() * 1000;
@@ -84,21 +83,6 @@ u32 arch_gettimeoffset(void)
 }
 #endif /* CONFIG_ARCH_USES_GETTIMEOFFSET */
 
-#ifdef CONFIG_LEDS_TIMER
-static inline void do_leds(void)
-{
-	static unsigned int count = HZ/2;
-
-	if (--count == 0) {
-		count = HZ/2;
-		leds_event(led_timer);
-	}
-}
-#else
-#define	do_leds()
-#endif
-
-
 #ifndef CONFIG_GENERIC_CLOCKEVENTS
 /*
  * Kernel system timer support.
@@ -106,7 +90,6 @@ static inline void do_leds(void)
 void timer_tick(void)
 {
 	profile_tick(CPU_PROFILING);
-	do_leds();
 	xtime_update(1);
 #ifndef CONFIG_SMP
 	update_process_times(user_mode(get_irq_regs()));
@@ -149,10 +132,11 @@ device_initcall(timer_init_syscore_ops);
 
 void __init time_init(void)
 {
+#ifdef CONFIG_ARCH_USES_GETTIMEOFFSET
+	arch_gettimeoffset = arm_gettimeoffset;
+#endif
+
 	system_timer = machine_desc->timer;
 	system_timer->init();
-#ifdef CONFIG_HAVE_SCHED_CLOCK
-	sched_clock_postinit();
-#endif
 }
 

@@ -1,4 +1,5 @@
-/* * Copyright (C) 2010-2012 ARM Limited. All rights reserved. * * This program is free software and is provided to you under the terms of the GNU General Public License version 2
+/* Copyright (C) 2010-2012 ARM Limited. All rights reserved. * 
+ * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
  *
  * A copy of the licence is included with the program, and can also be obtained from Free Software
@@ -37,7 +38,7 @@
 static int bMaliDvfsRun = 0;
 
 static _mali_osk_atomic_t bottomlock_status;
-static int bottom_lock_step = 0;
+static int bottom_lock_step;
 
 typedef struct mali_dvfs_tableTag{
 	unsigned int clock;
@@ -66,7 +67,7 @@ typedef struct mali_dvfs_stepTag{
 }mali_dvfs_step;
 
 mali_dvfs_step step[MALI_DVFS_STEPS]={
-	/*step 0 clk*/ {108,   950000},
+	/*step 0 clk*/ {108,   900000},
 #if (MALI_DVFS_STEPS > 1)
 	/*step 1 clk*/ {160,   950000},
 #if (MALI_DVFS_STEPS > 2)
@@ -376,9 +377,11 @@ static unsigned int decideNextStatus(unsigned int utilization)
 		for (i = 0; i < MALI_DVFS_STEPS; i++) {
 			step[i].clk = mali_dvfs_all[i].clock;
 		}
-//#ifdef EXYNOS4_ASV_ENABLED
-//		mali_dvfs_table_update();
-//#endif
+/*
+#ifdef EXYNOS4_ASV_ENABLED
+		mali_dvfs_table_update();
+#endif
+*/
 		i = 0;
 		for (i = 0; i < MALI_DVFS_STEPS; i++) {
 			mali_dvfs[i].clock = step[i].clk;
@@ -625,9 +628,7 @@ mali_bool init_mali_dvfs_status(int step)
 
 void deinit_mali_dvfs_status(void)
 {
-
 	_mali_osk_atomic_term(&bottomlock_status);
-
 
 	if (mali_dvfs_wq)
 		destroy_workqueue(mali_dvfs_wq);

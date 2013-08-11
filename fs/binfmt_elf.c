@@ -36,7 +36,6 @@
 #include <asm/uaccess.h>
 #include <asm/param.h>
 #include <asm/page.h>
-#include <asm/exec.h>
 
 static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs);
 static int load_elf_library(struct file *);
@@ -1150,7 +1149,7 @@ static unsigned long vma_dump_size(struct vm_area_struct *vma,
 	}
 
 	/* Do not dump I/O mapped devices or special mappings */
-	if (vma->vm_flags & (VM_IO | VM_RESERVED))
+	if (vma->vm_flags & VM_IO)
 		return 0;
 
 	/* By default, dump shared memory if mapped from an anonymous file. */
@@ -1490,7 +1489,7 @@ static int fill_thread_core_info(struct elf_thread_core_info *t,
 
 static int fill_note_info(struct elfhdr *elf, int phdrs,
 			  struct elf_note_info *info,
-			  long signr, struct pt_regs *regs)
+			  siginfo_t *siginfo, struct pt_regs *regs)
 {
 	struct task_struct *dump_task = current;
 	const struct user_regset_view *view = task_user_regset_view(dump_task);
@@ -1560,7 +1559,7 @@ static int fill_note_info(struct elfhdr *elf, int phdrs,
 	 * Now fill in each thread's information.
 	 */
 	for (t = info->thread; t != NULL; t = t->next)
-		if (!fill_thread_core_info(t, view, signr, &info->size))
+		if (!fill_thread_core_info(t, view, siginfo->si_signo, &info->size))
 			return 0;
 
 	/*
@@ -1723,14 +1722,14 @@ static int elf_note_info_init(struct elf_note_info *info)
 
 static int fill_note_info(struct elfhdr *elf, int phdrs,
 			  struct elf_note_info *info,
-			  long signr, struct pt_regs *regs)
+			  siginfo_t *siginfo, struct pt_regs *regs)
 {
 	struct list_head *t;
 
 	if (!elf_note_info_init(info))
 		return 0;
 
-	if (signr) {
+	if (siginfo->si_signo) {
 		struct core_thread *ct;
 		struct elf_thread_status *ets;
 
@@ -1748,13 +1747,13 @@ static int fill_note_info(struct elfhdr *elf, int phdrs,
 			int sz;
 
 			ets = list_entry(t, struct elf_thread_status, list);
-			sz = elf_dump_thread_status(signr, ets);
+			sz = elf_dump_thread_status(siginfo->si_signo, ets);
 			info->thread_status_size += sz;
 		}
 	}
 	/* now collect the dump for the current */
 	memset(info->prstatus, 0, sizeof(*info->prstatus));
-	fill_prstatus(info->prstatus, current, signr);
+	fill_prstatus(info->prstatus, current, siginfo->si_signo);
 	elf_core_copy_regs(&info->prstatus->pr_reg, regs);
 
 	/* Set up header */
@@ -1961,12 +1960,11 @@ static int elf_core_dump(struct coredump_params *cprm)
 	 * Collect all the non-memory information about the process for the
 	 * notes.  This also sets up the file header.
 	 */
-	if (!fill_note_info(elf, e_phnum, &info, cprm->signr, cprm->regs))
+	if (!fill_note_info(elf, e_phnum, &info, cprm->siginfo, cprm->regs))
 		goto cleanup;
 
 	has_dumped = 1;
-	current->flags |= PF_DUMPCORE;
-  
+
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 

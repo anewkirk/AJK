@@ -66,6 +66,11 @@ static int reiserfs_sync_fs(struct super_block *s, int wait)
 {
 	struct reiserfs_transaction_handle th;
 
+	/*
+	 * Writeback quota in non-journalled quota case - journalled quota has
+	 * no dirty dquots
+	 */
+	dquot_writeback_dquots(s, -1);
 	reiserfs_write_lock(s);
 	if (!journal_begin(&th, s, 1))
 		if (!journal_end_sync(&th, s, 1))
@@ -1793,11 +1798,9 @@ static int reiserfs_fill_super(struct super_block *s, void *data, int silent)
 		unlock_new_inode(root_inode);
 	}
 
-	s->s_root = d_alloc_root(root_inode);
-	if (!s->s_root) {
-		iput(root_inode);
+	s->s_root = d_make_root(root_inode);
+	if (!s->s_root)
 		goto error;
-	}
 	// define and initialize hash function
 	sbi->s_hash_function = hash_function(s);
 	if (sbi->s_hash_function == NULL) {

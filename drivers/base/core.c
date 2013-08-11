@@ -249,15 +249,21 @@ static int dev_uevent(struct kset *kset, struct kobject *kobj,
 		const char *tmp;
 		const char *name;
 		umode_t mode = 0;
+		kuid_t uid = GLOBAL_ROOT_UID;
+		kgid_t gid = GLOBAL_ROOT_GID;
 
 		add_uevent_var(env, "MAJOR=%u", MAJOR(dev->devt));
 		add_uevent_var(env, "MINOR=%u", MINOR(dev->devt));
-		name = device_get_devnode(dev, &mode, &tmp);
+		name = device_get_devnode(dev, &mode, &uid, &gid, &tmp);
 		if (name) {
 			add_uevent_var(env, "DEVNAME=%s", name);
-			kfree(tmp);
 			if (mode)
 				add_uevent_var(env, "DEVMODE=%#o", mode & 0777);
+			if (!uid_eq(uid, GLOBAL_ROOT_UID))
+				add_uevent_var(env, "DEVUID=%u", from_kuid(&init_user_ns, uid));
+			if (!gid_eq(gid, GLOBAL_ROOT_GID))
+				add_uevent_var(env, "DEVGID=%u", from_kgid(&init_user_ns, gid));
+			kfree(tmp);
 		}
 	}
 
@@ -648,7 +654,7 @@ void device_initialize(struct device *dev)
 	set_dev_node(dev, -1);
 }
 
-static struct kobject *virtual_device_parent(struct device *dev)
+struct kobject *virtual_device_parent(struct device *dev)
 {
 	static struct kobject *virtual_dir = NULL;
 
@@ -1227,6 +1233,8 @@ static struct device *next_device(struct klist_iter *i)
  * device_get_devnode - path of device node file
  * @dev: device
  * @mode: returned file access mode
+ * @uid: returned file owner
+ * @gid: returned file group
  * @tmp: possibly allocated string
  *
  * Return the relative path of a possible device node.
@@ -1235,7 +1243,8 @@ static struct device *next_device(struct klist_iter *i)
  * freed by the caller.
  */
 const char *device_get_devnode(struct device *dev,
-			       umode_t *mode, const char **tmp)
+			       umode_t *mode, kuid_t *uid, kgid_t *gid,
+			       const char **tmp)
 {
 	char *s;
 
@@ -1243,7 +1252,7 @@ const char *device_get_devnode(struct device *dev,
 
 	/* the device type may provide a specific name */
 	if (dev->type && dev->type->devnode)
-		*tmp = dev->type->devnode(dev, mode);
+		*tmp = dev->type->devnode(dev, mode, uid, gid);
 	if (*tmp)
 		return *tmp;
 
@@ -1731,25 +1740,25 @@ int device_move(struct device *dev, struct device *new_parent,
 		set_dev_node(dev, dev_to_node(new_parent));
 	}
 
-	if (!dev->class)
-		goto out_put;
-	error = device_move_class_links(dev, old_parent, new_parent);
-	if (error) {
-		/* We ignore errors on cleanup since we're hosed anyway... */
-		device_move_class_links(dev, new_parent, old_parent);
-		if (!kobject_move(&dev->kobj, &old_parent->kobj)) {
-			if (new_parent)
-				klist_remove(&dev->p->knode_parent);
-			dev->parent = old_parent;
-			if (old_parent) {
-				klist_add_tail(&dev->p->knode_parent,
-					       &old_parent->p->klist_children);
-				set_dev_node(dev, dev_to_node(old_parent));
+	if (dev->class) {
+		error = device_move_class_links(dev, old_parent, new_parent);
+		if (error) {
+			/* We ignore errors on cleanup since we're hosed anyway... */
+			device_move_class_links(dev, new_parent, old_parent);
+			if (!kobject_move(&dev->kobj, &old_parent->kobj)) {
+				if (new_parent)
+					klist_remove(&dev->p->knode_parent);
+				dev->parent = old_parent;
+				if (old_parent) {
+					klist_add_tail(&dev->p->knode_parent,
+						       &old_parent->p->klist_children);
+					set_dev_node(dev, dev_to_node(old_parent));
+				}
 			}
+			cleanup_glue_dir(dev, new_parent_kobj);
+			put_device(new_parent);
+			goto out;
 		}
-		cleanup_glue_dir(dev, new_parent_kobj);
-		put_device(new_parent);
-		goto out;
 	}
 	switch (dpm_order) {
 	case DPM_ORDER_NONE:
@@ -1764,7 +1773,7 @@ int device_move(struct device *dev, struct device *new_parent,
 		device_pm_move_last(dev);
 		break;
 	}
-out_put:
+
 	put_device(old_parent);
 out:
 	device_pm_unlock();

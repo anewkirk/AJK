@@ -76,21 +76,6 @@ extern int in_group_p(gid_t);
 extern int in_egroup_p(gid_t);
 
 /*
- * The common credentials for a thread group
- * - shared by CLONE_THREAD
- */
-#ifdef CONFIG_KEYS
-struct thread_group_cred {
-	atomic_t	usage;
-	pid_t		tgid;			/* thread group process ID */
-	spinlock_t	lock;
-	struct key __rcu *session_keyring;	/* keyring inherited over fork */
-	struct key	*process_keyring;	/* keyring private to this process */
-	struct rcu_head	rcu;			/* RCU deletion hook */
-};
-#endif
-
-/*
  * The security context of a task
  *
  * The parts of the context break down into two categories:
@@ -122,14 +107,14 @@ struct cred {
 #define CRED_MAGIC	0x43736564
 #define CRED_MAGIC_DEAD	0x44656144
 #endif
-	uid_t		uid;		/* real UID of the task */
-	gid_t		gid;		/* real GID of the task */
-	uid_t		suid;		/* saved UID of the task */
-	gid_t		sgid;		/* saved GID of the task */
-	uid_t		euid;		/* effective UID of the task */
-	gid_t		egid;		/* effective GID of the task */
-	uid_t		fsuid;		/* UID for VFS ops */
-	gid_t		fsgid;		/* GID for VFS ops */
+	kuid_t		uid;		/* real UID of the task */
+	kgid_t		gid;		/* real GID of the task */
+	kuid_t		suid;		/* saved UID of the task */
+	kgid_t		sgid;		/* saved GID of the task */
+	kuid_t		euid;		/* effective UID of the task */
+	kgid_t		egid;		/* effective GID of the task */
+	kuid_t		fsuid;		/* UID for VFS ops */
+	kgid_t		fsgid;		/* GID for VFS ops */
 	unsigned	securebits;	/* SUID-less security management */
 	kernel_cap_t	cap_inheritable; /* caps our children can inherit */
 	kernel_cap_t	cap_permitted;	/* caps we're permitted */
@@ -138,6 +123,8 @@ struct cred {
 #ifdef CONFIG_KEYS
 	unsigned char	jit_keyring;	/* default keyring to attach requested
 					 * keys to */
+	struct key __rcu *session_keyring; /* keyring inherited over fork */
+	struct key	*process_keyring; /* keyring private to this process */
 	struct key	*thread_keyring; /* keyring private to this thread */
 	struct key	*request_key_auth; /* assumed request_key authority */
 	struct thread_group_cred *tgcred; /* thread-group shared credentials */
@@ -358,10 +345,10 @@ static inline void put_cred(const struct cred *_cred)
 #define current_security()	(current_cred_xxx(security))
 
 #ifdef CONFIG_USER_NS
-#define current_user_ns() (current_cred_xxx(user_ns))
+#define current_user_ns()	(current_cred_xxx(user_ns))
 #else
 extern struct user_namespace init_user_ns;
-#define current_user_ns() (&init_user_ns)
+#define current_user_ns()	(&init_user_ns)
 #endif
 
 

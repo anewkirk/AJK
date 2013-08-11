@@ -19,6 +19,10 @@
 #include <linux/msi.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
+#include <linux/ratelimit.h>
+#include <linux/err.h>
+#include <linux/irqflags.h>
+#include <linux/context_tracking.h>
 #include <asm/signal.h>
 
 #include <linux/kvm.h>
@@ -389,7 +393,7 @@ int kvm_write_guest(struct kvm *kvm, gpa_t gpa, const void *data,
 int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len);
 int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
-			      gpa_t gpa);
+			      gpa_t gpa, unsigned long len);
 int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len);
 int kvm_clear_guest(struct kvm *kvm, gpa_t gpa, unsigned long len);
 struct kvm_memory_slot *gfn_to_memslot(struct kvm *kvm, gfn_t gfn);
@@ -599,13 +603,14 @@ static inline int kvm_deassign_device(struct kvm *kvm,
 
 static inline void kvm_guest_enter(void)
 {
+	unsigned long flags;
+
 	BUG_ON(preemptible());
-	/*
-	 * This is running in ioctl context so we can avoid
-	 * the call to vtime_account() with its unnecessary idle check.
-	 */
-	vtime_account_system_irqsafe(current);
-	current->flags |= PF_VCPU;
+
+	local_irq_save(flags);
+	guest_enter();
+	local_irq_restore(flags);
+
 	/* KVM does not hold any references to rcu protected data when it
 	 * switches CPU into a guest mode. In fact switching to a guest mode
 	 * is very similar to exiting to userspase from rcu point of view. In
@@ -618,12 +623,11 @@ static inline void kvm_guest_enter(void)
 
 static inline void kvm_guest_exit(void)
 {
-	/*
-	 * This is running in ioctl context so we can avoid
-	 * the call to vtime_account() with its unnecessary idle check.
-	 */
-	vtime_account_system_irqsafe(current);
-	current->flags &= ~PF_VCPU;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	guest_exit();
+	local_irq_restore(flags);
 }
 
 static inline int memslot_id(struct kvm *kvm, gfn_t gfn)
@@ -745,6 +749,13 @@ static inline bool kvm_vcpu_is_bsp(struct kvm_vcpu *vcpu)
 {
 	return vcpu->kvm->bsp_vcpu_id == vcpu->vcpu_id;
 }
+
+bool kvm_vcpu_compatible(struct kvm_vcpu *vcpu);
+
+#else
+
+static inline bool kvm_vcpu_compatible(struct kvm_vcpu *vcpu) { return true; }
+
 #endif
 
 #ifdef __KVM_HAVE_DEVICE_ASSIGNMENT

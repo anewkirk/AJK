@@ -25,7 +25,7 @@
 #include <linux/kernel.h>
 	#define MALI_PANIC(fmt, args...) panic( fmt, ## args );
 #else
-	#define MALI_PANIC(fmt, args...) 
+	#define MALI_PANIC(fmt, args...)
 #endif
 
 

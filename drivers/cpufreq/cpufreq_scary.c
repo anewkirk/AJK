@@ -17,6 +17,7 @@
 #include <linux/hrtimer.h>
 #include <linux/tick.h>
 #include <linux/ktime.h>
+#include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/earlysuspend.h>
 #include <asm/cputime.h>
@@ -42,7 +43,6 @@
  */
 #define DEFAULT_SLEEP_PREV_FREQ			200000
 #define DEFAULT_PREV_MAX			600000
-static unsigned int suspended;
 static unsigned int sleep_max_freq=DEFAULT_SLEEP_MAX_FREQ;
 static unsigned int sleep_min_freq=DEFAULT_SLEEP_MIN_FREQ;
 static unsigned int sleep_prev_freq=DEFAULT_SLEEP_PREV_FREQ;
@@ -58,22 +58,22 @@ static unsigned int sleep_prev_max=DEFAULT_PREV_MAX;
  * this governor will not work.
  * All times here are in uS.
  */
-#define MIN_SAMPLING_RATE_RATIO			(2)
+#define MIN_SAMPLING_RATE_RATIO			(1)
 
 static unsigned int min_sampling_rate;
 
 extern unsigned int touch_is_pressed;
 
 #define LATENCY_MULTIPLIER			(1000)
-#define MIN_LATENCY_MULTIPLIER			(100)
+#define MIN_LATENCY_MULTIPLIER			(20)
 #define TRANSITION_LATENCY_LIMIT		(10 * 1000 * 1000)
 
 
 static void do_dbs_timer(struct work_struct *work);
 
 struct cpu_dbs_info_s {
-	cputime64_t prev_cpu_idle;
-	cputime64_t prev_cpu_wall;
+	u64 prev_cpu_idle;
+	u64 prev_cpu_wall;
 	unsigned int prev_cpu_wall_delta;
 	cputime64_t prev_cpu_nice;
 	struct cpufreq_policy *cur_policy;
@@ -109,6 +109,7 @@ static struct dbs_tuners {
 	unsigned int ignore_nice;
 	unsigned int freq_step;
 	unsigned int smooth_ui;
+	bool suspended;
 } dbs_tuners_ins = {
 	.up_threshold = DEF_FREQUENCY_UP_THRESHOLD,
 	.down_threshold = DEF_FREQUENCY_DOWN_THRESHOLD,
@@ -116,41 +117,8 @@ static struct dbs_tuners {
 	.ignore_nice = 0,
 	.freq_step = DEFAULT_FREQ_STEP,
 	.smooth_ui = DEF_SMOOTH_UI,
+	.suspended = 0,
 };
-
-static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
-{
-	u64 idle_time;
-	u64 cur_wall_time;
-	u64 busy_time;
-
-	cur_wall_time = jiffies64_to_cputime64(get_jiffies_64());
-
-	busy_time  = kcpustat_cpu(cpu).cpustat[CPUTIME_USER];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SYSTEM];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_IRQ];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_SOFTIRQ];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_STEAL];
-	busy_time += kcpustat_cpu(cpu).cpustat[CPUTIME_NICE];
-
-	idle_time = cur_wall_time - busy_time;
-	if (wall)
-		*wall = jiffies_to_usecs(cur_wall_time);
-
-	return jiffies_to_usecs(idle_time);
-}
-
-static inline cputime64_t get_cpu_idle_time(unsigned int cpu, cputime64_t *wall)
-{
-	u64 idle_time = get_cpu_idle_time_us(cpu, NULL);
-
-	if (idle_time == -1ULL)
-		return get_cpu_idle_time_jiffy(cpu, wall);
-	else
-		idle_time += get_cpu_iowait_time_us(cpu, wall);
-
-	return idle_time;
-}
 
 /* keep track of frequency transitions */
 static int
@@ -266,7 +234,6 @@ static ssize_t store_up_threshold(struct cpufreq_policy *unused,
 		mutex_unlock(&dbs_mutex);
 		return -EINVAL;
 	}
-
 	dbs_tuners_ins.up_threshold = input;
 	mutex_unlock(&dbs_mutex);
 
@@ -278,6 +245,7 @@ static ssize_t store_down_threshold(struct cpufreq_policy *unused,
 {
 	unsigned int input;
 	int ret;
+
 	ret = sscanf(buf, "%u", &input);
 
 	mutex_lock(&dbs_mutex);
@@ -295,11 +263,10 @@ static ssize_t store_down_threshold(struct cpufreq_policy *unused,
 }
 
 static ssize_t store_ignore_nice_load(struct cpufreq_policy *policy,
-		const char *buf, size_t count)
+				      const char *buf, size_t count)
 {
 	unsigned int input;
 	int ret;
-
 	unsigned int j;
 
 	ret = sscanf(buf, "%u", &input);
@@ -331,12 +298,12 @@ static ssize_t store_ignore_nice_load(struct cpufreq_policy *policy,
 }
 
 static ssize_t store_freq_step(struct cpufreq_policy *policy,
-		const char *buf, size_t count)
+				    const char *buf, size_t count)
 {
 	unsigned int input;
 	int ret;
-	ret = sscanf(buf, "%u", &input);
 
+	ret = sscanf(buf, "%u", &input);
 	if (ret != 1)
 		return -EINVAL;
 
@@ -353,10 +320,11 @@ static ssize_t store_freq_step(struct cpufreq_policy *policy,
 }
 
 static ssize_t store_smooth_ui(struct cpufreq_policy *unused,
-		const char *buf, size_t count)
+				   const char *buf, size_t count)
 {
 	unsigned int input;
 	int ret;
+
 	ret = sscanf(buf, "%u", &input);
 
 	if (ret != 1)
@@ -448,7 +416,7 @@ static void smartass_suspend(int cpu, int suspend)
 static void smartass_early_suspend(struct early_suspend *handler) 
 {
     int i;
-    suspended = 1;
+    dbs_tuners_ins.suspended = 1;
     for_each_online_cpu(i)
     smartass_suspend(i, 1);
 }
@@ -456,7 +424,7 @@ static void smartass_early_suspend(struct early_suspend *handler)
 static void smartass_late_resume(struct early_suspend *handler) 
 {
     int i;
-    suspended = 0;
+    dbs_tuners_ins.suspended = 0;
     for_each_online_cpu(i)
     smartass_suspend(i, 0);
 }
@@ -492,7 +460,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 	/* Get Absolute Load */
 	for_each_cpu(j, policy->cpus) {
 		struct cpu_dbs_info_s *j_dbs_info;
-		cputime64_t cur_wall_time, cur_idle_time;
+		u64 cur_wall_time, cur_idle_time;
 		unsigned int idle_time, wall_time;
 		bool deep_sleep_detected = false;
 		/* the evil magic numbers, only 2 at least */
@@ -504,7 +472,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		cur_idle_time = get_cpu_idle_time(j, &cur_wall_time);
 
 		wall_time = (unsigned int)
-				(cur_wall_time - j_dbs_info->prev_cpu_wall);
+			(cur_wall_time - j_dbs_info->prev_cpu_wall);
 		j_dbs_info->prev_cpu_wall = cur_wall_time;
 
 		/*
@@ -534,7 +502,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 			 + wall_time) / (deep_sleep_backoff+1);
 
 		idle_time = (unsigned int)
-				(cur_idle_time - j_dbs_info->prev_cpu_idle);
+			(cur_idle_time - j_dbs_info->prev_cpu_idle);
 		j_dbs_info->prev_cpu_idle = cur_idle_time;
 
 		if (dbs_tuners_ins.ignore_nice) {
@@ -653,7 +621,7 @@ static inline void dbs_timer_exit(struct cpu_dbs_info_s *dbs_info)
 }
 
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
-				   unsigned int event)
+				unsigned int event)
 {
 	unsigned int cpu = policy->cpu;
 	struct cpu_dbs_info_s *this_dbs_info;
@@ -663,7 +631,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	unsigned int max_freq = 0;
 	unsigned int i;	
 	struct cpufreq_frequency_table *freq_table;
-	suspended=0;
 
 	this_dbs_info = &per_cpu(cs_cpu_dbs_info, cpu);
 
@@ -691,6 +658,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 				j_dbs_info->prev_cpu_nice =
 						kcpustat_cpu(j).cpustat[CPUTIME_NICE];
 		}
+		this_dbs_info->cpu = cpu;
 		this_dbs_info->down_skip = 0;
 		this_dbs_info->requested_freq = policy->cur;
 
@@ -712,7 +680,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			 * governor, thus we are bound to jiffes/HZ
 			 */
 			min_sampling_rate =
-				MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(10);
+				MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(5);
 			/* Bring kernel and HW constraints together */
 			min_sampling_rate = max(min_sampling_rate,
 					MIN_LATENCY_MULTIPLIER * latency);
@@ -723,6 +691,8 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			cpufreq_register_notifier(
 					&dbs_cpufreq_notifier_block,
 					CPUFREQ_TRANSITION_NOTIFIER);
+
+			dbs_tuners_ins.suspended = 0;
 		}
 		mutex_unlock(&dbs_mutex);
 
@@ -769,13 +739,12 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	case CPUFREQ_GOV_LIMITS:
 		mutex_lock(&this_dbs_info->timer_mutex);
 		if (policy->max < this_dbs_info->cur_policy->cur)
-			__cpufreq_driver_target(
-					this_dbs_info->cur_policy,
-					policy->max, CPUFREQ_RELATION_H);
+			__cpufreq_driver_target(this_dbs_info->cur_policy,
+				policy->max, CPUFREQ_RELATION_H);
 		else if (policy->min > this_dbs_info->cur_policy->cur)
-			__cpufreq_driver_target(
-					this_dbs_info->cur_policy,
-					policy->min, CPUFREQ_RELATION_L);
+			__cpufreq_driver_target(this_dbs_info->cur_policy,
+				policy->min, CPUFREQ_RELATION_L);
+		dbs_check_cpu(this_dbs_info);
 		mutex_unlock(&this_dbs_info->timer_mutex);
 
 		break;
@@ -800,20 +769,30 @@ static int __init cpufreq_gov_dbs_init(void)
 	kconservative_wq = create_workqueue("kconservative");
 	if (!kconservative_wq) {
 		printk(KERN_ERR "Creation of kconservative failed\n");
-		return -EFAULT;
+		err = -EFAULT;
+		goto error_reg;
 	}
     register_early_suspend(&smartass_power_suspend);
 	err = cpufreq_register_governor(&cpufreq_gov_scary);
-	if (err)
-		destroy_workqueue(kconservative_wq);
+	if (err) {
+		goto error_queue;
+	}
 
 	return err;
+
+error_queue:
+destroy_workqueue(kconservative_wq);
+error_reg:
+kfree(&dbs_tuners_ins);
+return err;
+
 }
 
 static void __exit cpufreq_gov_dbs_exit(void)
 {
 	cpufreq_unregister_governor(&cpufreq_gov_scary);
 	destroy_workqueue(kconservative_wq);
+	kfree(&dbs_tuners_ins);
 }
 
 

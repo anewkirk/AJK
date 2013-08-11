@@ -28,6 +28,7 @@
 #include <linux/quotaops.h>
 #include <linux/slab.h>
 #include <linux/log2.h>
+#include <linux/aio.h>
 
 #include "aops.h"
 #include "attrib.h"
@@ -2258,7 +2259,7 @@ void ntfs_evict_big_inode(struct inode *vi)
 	ntfs_inode *ni = NTFS_I(vi);
 
 	truncate_inode_pages(&vi->i_data, 0);
-	end_writeback(vi);
+	clear_inode(vi);
 
 #ifdef NTFS_RW
 	if (NInoDirty(ni)) {

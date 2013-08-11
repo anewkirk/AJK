@@ -9,9 +9,9 @@
 #include <linux/file.h>
 #include <linux/utsname.h>
 #include <net/net_namespace.h>
-#include <linux/mnt_namespace.h>
 #include <linux/ipc_namespace.h>
 #include <linux/pid_namespace.h>
+#include <linux/user_namespace.h>
 #include "internal.h"
 
 
@@ -24,6 +24,12 @@ static const struct proc_ns_operations *ns_entries[] = {
 #endif
 #ifdef CONFIG_IPC_NS
 	&ipcns_operations,
+#endif
+#ifdef CONFIG_PID_NS
+	&pidns_operations,
+#endif
+#ifdef CONFIG_USER_NS
+	&userns_operations,
 #endif
 };
 
@@ -57,7 +63,7 @@ static struct dentry *proc_ns_instantiate(struct inode *dir,
 	d_set_d_op(dentry, &pid_dentry_operations);
 	d_add(dentry, inode);
 	/* Close the race of the process dying before we return the dentry */
-	if (pid_revalidate(dentry, NULL))
+	if (pid_revalidate(dentry, 0))
 		error = NULL;
 out:
 	return error;

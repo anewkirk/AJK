@@ -10,6 +10,8 @@
  */
 
 #include <linux/proc_fs.h>
+struct  ctl_table_header;
+struct  mempolicy;
 
 extern struct proc_dir_entry proc_root;
 #ifdef CONFIG_PROC_SYSCTL
@@ -23,30 +25,6 @@ extern int proc_net_init(void);
 static inline int proc_net_init(void) { return 0; }
 #endif
 
-struct vmalloc_info {
-	unsigned long	used;
-	unsigned long	largest_chunk;
-#ifdef CONFIG_PROC_SEC_MEMINFO
-	unsigned long low_page_cnt;
-	unsigned long total_page_cnt;
-#endif
-};
-
-extern struct mm_struct *mm_for_maps(struct task_struct *);
-
-#ifdef CONFIG_MMU
-#define VMALLOC_TOTAL (VMALLOC_END - VMALLOC_START)
-extern void get_vmalloc_info(struct vmalloc_info *vmi);
-#else
-
-#define VMALLOC_TOTAL 0UL
-#define get_vmalloc_info(vmi)			\
-do {						\
-	(vmi)->used = 0;			\
-	(vmi)->largest_chunk = 0;		\
-} while(0)
-#endif
-
 extern int proc_tid_stat(struct seq_file *m, struct pid_namespace *ns,
 				struct pid *pid, struct task_struct *task);
 extern int proc_tgid_stat(struct seq_file *m, struct pid_namespace *ns,
@@ -57,9 +35,13 @@ extern int proc_pid_statm(struct seq_file *m, struct pid_namespace *ns,
 				struct pid *pid, struct task_struct *task);
 extern loff_t mem_lseek(struct file *file, loff_t offset, int orig);
 
-extern const struct file_operations proc_maps_operations;
-extern const struct file_operations proc_numa_maps_operations;
-extern const struct file_operations proc_smaps_operations;
+extern const struct file_operations proc_tid_children_operations;
+extern const struct file_operations proc_pid_maps_operations;
+extern const struct file_operations proc_tid_maps_operations;
+extern const struct file_operations proc_pid_numa_maps_operations;
+extern const struct file_operations proc_tid_numa_maps_operations;
+extern const struct file_operations proc_pid_smaps_operations;
+extern const struct file_operations proc_tid_smaps_operations;
 extern const struct file_operations proc_clear_refs_operations;
 extern const struct file_operations proc_pagemap_operations;
 extern const struct file_operations proc_net_operations;
@@ -70,6 +52,9 @@ struct proc_maps_private {
 	struct task_struct *task;
 #ifdef CONFIG_MMU
 	struct vm_area_struct *tail_vma;
+#endif
+#ifdef CONFIG_NUMA
+	struct mempolicy *task_mempolicy;
 #endif
 };
 
@@ -121,6 +106,7 @@ void pde_put(struct proc_dir_entry *pde);
 
 int proc_fill_super(struct super_block *);
 struct inode *proc_get_inode(struct super_block *, struct proc_dir_entry *);
+int proc_remount(struct super_block *sb, int *flags, char *data);
 
 /*
  * These are generic /proc routines that use the internal
@@ -140,7 +126,7 @@ typedef struct dentry *instantiate_t(struct inode *, struct dentry *,
 int proc_fill_cache(struct file *filp, void *dirent, filldir_t filldir,
 	const char *name, int len,
 	instantiate_t instantiate, struct task_struct *task, const void *ptr);
-int pid_revalidate(struct dentry *dentry, struct nameidata *nd);
+int pid_revalidate(struct dentry *dentry, unsigned int flags);
 struct inode *proc_pid_make_inode(struct super_block * sb, struct task_struct *task);
 extern const struct dentry_operations pid_dentry_operations;
 int pid_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat);

@@ -852,9 +852,9 @@ static int subsystem_mali200_irq_handler_bottom_half(struct mali_core_renderunit
 #if MALI_STATE_TRACKING
 		_mali_osk_atomic_inc(&job->session->jobs_ended);
 #endif
-		
+
 		pr_debug("SPI_GPU_PP%u Idle\n", core->core_number);
-             
+
 		return JOB_STATUS_END_SUCCESS; /* reschedule */
 	}
 	/* Overall SW watchdog timeout or (time to do hang checking and progress detected)? */
@@ -877,7 +877,7 @@ static int subsystem_mali200_irq_handler_bottom_half(struct mali_core_renderunit
 #endif
 
 		return JOB_STATUS_END_HANG;
-   	}
+	}
 	/* HW watchdog triggered or an existing hang check passed? */
 	else if	((CORE_HANG_CHECK_TIMEOUT == core->state) || (irq_readout & job200->active_mask & MALI200_REG_VAL_IRQ_HANG))
 	{
@@ -1291,7 +1291,7 @@ _mali_osk_errcode_t malipp_signal_power_up( u32 core_num, mali_bool queue_only )
 
 	return( mali_core_subsystem_signal_power_up( &subsystem_mali200, core_num, queue_only ) );
 }
-	
+
 _mali_osk_errcode_t malipp_signal_power_down( u32 core_num, mali_bool immediate_only )
 {
 	MALI_DEBUG_PRINT(4, ("Mali PP: signal power down core: %d - immediate_only: %d\n", core_num, immediate_only ));

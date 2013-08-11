@@ -2032,10 +2032,9 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 		ext3_msg(sb, KERN_ERR, "error: corrupt root inode, run e2fsck");
 		goto failed_mount3;
 	}
-	sb->s_root = d_alloc_root(root);
+	sb->s_root = d_make_root(root);
 	if (!sb->s_root) {
 		ext3_msg(sb, KERN_ERR, "error: get root dentry failed");
-		iput(root);
 		ret = -ENOMEM;
 		goto failed_mount3;
 	}
@@ -2053,7 +2052,6 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 		test_opt(sb,DATA_FLAGS) == EXT3_MOUNT_JOURNAL_DATA ? "journal":
 		test_opt(sb,DATA_FLAGS) == EXT3_MOUNT_ORDERED_DATA ? "ordered":
 		"writeback");
-	sb->s_flags |= MS_SNAP_STABLE;
 
 	return 0;
 
@@ -2508,6 +2506,12 @@ static int ext3_sync_fs(struct super_block *sb, int wait)
 {
 	tid_t target;
 
+	trace_ext3_sync_fs(sb, wait);
+	/*
+	 * Writeback quota in non-journalled quota case - journalled quota has
+	 * no dirty dquots
+	 */
+	dquot_writeback_dquots(sb, -1);
 	if (journal_start_commit(EXT3_SB(sb)->s_journal, &target)) {
 		if (wait)
 			log_wait_commit(EXT3_SB(sb)->s_journal, target);

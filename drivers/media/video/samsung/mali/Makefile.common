@@ -29,7 +29,7 @@ UKKFILES=\
 	$(FILES_PREFIX)$(OSKOS)/mali_ukk_gp.c \
 	$(FILES_PREFIX)$(OSKOS)/mali_ukk_pp.c \
 	$(FILES_PREFIX)$(OSKOS)/mali_ukk_core.c
-	
+
 ifeq ($(USING_PROFILING),1)
 UKKFILES+=\
 	$(FILES_PREFIX)$(OSKOS)/mali_ukk_profiling.c

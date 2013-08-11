@@ -3098,6 +3098,18 @@ sub process {
 			     "__aligned(size) is preferred over __attribute__((aligned(size)))\n" . $herecurr);
 		}
 
+# Check for __attribute__ format(printf, prefer __printf
+		if ($line =~ /\b__attribute__\s*\(\s*\(\s*format\s*\(\s*printf/) {
+			WARN("PREFER_PRINTF",
+			     "__printf(string-index, first-to-check) is preferred over __attribute__((format(printf, string-index, first-to-check)))\n" . $herecurr);
+		}
+
+# Check for __attribute__ format(scanf, prefer __scanf
+		if ($line =~ /\b__attribute__\s*\(\s*\(\s*format\s*\(\s*scanf\b/) {
+			WARN("PREFER_SCANF",
+			     "__scanf(string-index, first-to-check) is preferred over __attribute__((format(scanf, string-index, first-to-check)))\n" . $herecurr);
+		}
+
 # check for sizeof(&)
 		if ($line =~ /\bsizeof\s*\(\s*\&/) {
 			WARN("SIZEOF_ADDRESS",
@@ -3174,10 +3186,10 @@ sub process {
 			     "consider using a completion\n" . $herecurr);
 
 		}
-# recommend kstrto* over simple_strto*
-		if ($line =~ /\bsimple_(strto.*?)\s*\(/) {
+# recommend kstrto* over simple_strto* and strict_strto*
+		if ($line =~ /\b((simple|strict)_(strto(l|ll|ul|ull)))\s*\(/) {
 			WARN("CONSIDER_KSTRTO",
-			     "consider using kstrto* in preference to simple_$1\n" . $herecurr);
+			     "$1 is obsolete, use k$3 instead\n" . $herecurr);
 		}
 # check for __initcall(), use device_initcall() explicitly please
 		if ($line =~ /^.\s*__initcall\s*\(/) {

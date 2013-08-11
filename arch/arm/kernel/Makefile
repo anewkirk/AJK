@@ -21,7 +21,6 @@ obj-y		:= elf.o entry-armv.o entry-common.o irq.o \
 
 obj-$(CONFIG_DEPRECATED_PARAM_STRUCT) += compat.o
 
-obj-$(CONFIG_LEDS)		+= leds.o
 obj-$(CONFIG_OC_ETM)		+= etm.o
 
 obj-$(CONFIG_ISA_DMA_API)	+= dma.o
@@ -32,7 +31,6 @@ obj-$(CONFIG_ARTHUR)		+= arthur.o
 obj-$(CONFIG_ISA_DMA)		+= dma-isa.o
 obj-$(CONFIG_PCI)		+= bios32.o isa.o
 obj-$(CONFIG_PM_SLEEP)		+= sleep.o
-obj-$(CONFIG_HAVE_SCHED_CLOCK)	+= sched_clock.o
 obj-$(CONFIG_SMP)		+= smp.o smp_tlb.o
 obj-$(CONFIG_HAVE_ARM_SCU)	+= smp_scu.o
 obj-$(CONFIG_HAVE_ARM_TWD)	+= smp_twd.o
@@ -56,7 +54,6 @@ obj-$(CONFIG_CRASH_DUMP)	+= crash_dump.o
 obj-$(CONFIG_SWP_EMULATE)	+= swp_emulate.o
 CFLAGS_swp_emulate.o		:= -Wa,-march=armv7-a
 obj-$(CONFIG_HAVE_HW_BREAKPOINT)	+= hw_breakpoint.o
-obj-$(CONFIG_GENERIC_TIME_VSYSCALL)  += update_vsyscall_arm.o 
 
 obj-$(CONFIG_CRUNCH)		+= crunch.o crunch-bits.o
 AFLAGS_crunch-bits.o		:= -Wa,-mcpu=ep9312

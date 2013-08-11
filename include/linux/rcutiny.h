@@ -27,10 +27,6 @@
 
 #include <linux/cache.h>
 
-static inline void rcu_init(void)
-{
-}
-
 static inline void rcu_barrier_bh(void)
 {
 	wait_rcu_gp(call_rcu_bh);
@@ -53,16 +49,7 @@ static inline void rcu_barrier(void)
 	rcu_barrier_sched();  /* Only one CPU, so only one list of callbacks! */
 }
 
-#else /* #ifdef CONFIG_TINY_RCU */
-
-void synchronize_rcu_expedited(void);
-
-static inline void rcu_barrier(void)
-{
-	wait_rcu_gp(call_rcu);
-}
-
-#endif /* #else #ifdef CONFIG_TINY_RCU */
+#endif /* #ifdef CONFIG_TINY_RCU */
 
 static inline void synchronize_rcu_bh(void)
 {
@@ -97,19 +84,7 @@ static inline int rcu_needs_cpu(int cpu, unsigned long *delta_jiffies)
 	return 0;
 }
 
-#else /* #ifdef CONFIG_TINY_RCU */
-
-extern void exit_rcu(void);
-void rcu_preempt_note_context_switch(void);
-int rcu_preempt_needs_cpu(void);
-
-static inline int rcu_needs_cpu(int cpu, unsigned long *delta_jiffies)
-{
-	*delta_jiffies = ULONG_MAX;
-	return rcu_preempt_needs_cpu();
-}
-
-#endif /* #else #ifdef CONFIG_TINY_RCU */
+#endif /* #ifdef CONFIG_TINY_RCU */
 
 static inline void rcu_note_context_switch(int cpu)
 {
@@ -154,6 +129,10 @@ static inline void rcu_sched_force_quiescent_state(void)
 }
 
 static inline void rcu_cpu_stall_reset(void)
+{
+}
+
+static inline void exit_rcu(void)
 {
 }
 

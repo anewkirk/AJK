@@ -1919,15 +1919,13 @@ static int idetape_open(struct block_device *bdev, fmode_t mode)
 	return 0;
 }
 
-static int idetape_release(struct gendisk *disk, fmode_t mode)
+static void idetape_release(struct gendisk *disk, fmode_t mode)
 {
 	struct ide_tape_obj *tape = ide_drv_g(disk, ide_tape_obj);
 
 	mutex_lock(&ide_tape_mutex);
 	ide_tape_put(tape);
 	mutex_unlock(&ide_tape_mutex);
-
-	return 0;
 }
 
 static int idetape_ioctl(struct block_device *bdev, fmode_t mode,
@@ -1988,7 +1986,7 @@ static int ide_tape_probe(ide_drive_t *drive)
 
 	tape->dev.parent = &drive->gendev;
 	tape->dev.release = ide_tape_release;
-	dev_set_name(&tape->dev, dev_name(&drive->gendev));
+	dev_set_name(&tape->dev, "%s", dev_name(&drive->gendev));
 
 	if (device_register(&tape->dev))
 		goto out_free_disk;

@@ -7,6 +7,7 @@
 
 #include <linux/pm_runtime.h>
 #include <linux/async.h>
+#include <linux/module.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_device.h>
@@ -141,17 +142,16 @@ static int scsi_runtime_resume(struct device *dev)
 
 static int scsi_runtime_idle(struct device *dev)
 {
-	int err;
-
 	dev_dbg(dev, "scsi_runtime_idle\n");
 
 	/* Insert hooks here for targets, hosts, and transport classes */
 
-	if (scsi_is_sdev_device(dev))
-		err = pm_schedule_suspend(dev, 100);
-	else
-		err = pm_runtime_suspend(dev);
-	return err;
+	if (scsi_is_sdev_device(dev)) {
+		pm_schedule_suspend(dev, 100);
+		return -EBUSY;
+	}
+
+	return 0;
 }
 
 int scsi_autopm_get_device(struct scsi_device *sdev)

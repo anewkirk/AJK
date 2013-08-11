@@ -1607,7 +1607,7 @@ out:
 	return rc;
 }
 
-static int idecd_release(struct gendisk *disk, fmode_t mode)
+static void idecd_release(struct gendisk *disk, fmode_t mode)
 {
 	struct cdrom_info *info = ide_drv_g(disk, cdrom_info);
 
@@ -1616,8 +1616,6 @@ static int idecd_release(struct gendisk *disk, fmode_t mode)
 
 	ide_cd_put(info);
 	mutex_unlock(&ide_cd_mutex);
-
-	return 0;
 }
 
 static int idecd_set_spindown(struct cdrom_device_info *cdi, unsigned long arg)
@@ -1759,7 +1757,7 @@ static int ide_cd_probe(ide_drive_t *drive)
 
 	info->dev.parent = &drive->gendev;
 	info->dev.release = ide_cd_release;
-	dev_set_name(&info->dev, dev_name(&drive->gendev));
+	dev_set_name(&info->dev, "%s", dev_name(&drive->gendev));
 
 	if (device_register(&info->dev))
 		goto out_free_disk;

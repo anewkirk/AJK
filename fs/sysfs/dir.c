@@ -256,12 +256,12 @@ static int sysfs_dentry_delete(const struct dentry *dentry)
 	return !!(sd->s_flags & SYSFS_FLAG_REMOVED);
 }
 
-static int sysfs_dentry_revalidate(struct dentry *dentry, struct nameidata *nd)
+static int sysfs_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	struct sysfs_dirent *sd;
 	int is_dir;
 
-	if (nd->flags & LOOKUP_RCU)
+	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
 	sd = dentry->d_fsdata;
@@ -973,6 +973,8 @@ static int sysfs_readdir(struct file * filp, void * dirent, filldir_t filldir)
 		ino = parent_sd->s_ino;
 		if (filldir(dirent, ".", 1, filp->f_pos, ino, DT_DIR) == 0)
 			filp->f_pos++;
+		else
+			return 0;
 	}
 	if (filp->f_pos == 1) {
 		if (parent_sd->s_parent)
@@ -981,6 +983,8 @@ static int sysfs_readdir(struct file * filp, void * dirent, filldir_t filldir)
 			ino = parent_sd->s_ino;
 		if (filldir(dirent, "..", 2, filp->f_pos, ino, DT_DIR) == 0)
 			filp->f_pos++;
+		else
+			return 0;
 	}
 	mutex_lock(&sysfs_mutex);
 	for (pos = sysfs_dir_pos(ns, parent_sd, filp->f_pos, pos);
@@ -1010,7 +1014,6 @@ static int sysfs_readdir(struct file * filp, void * dirent, filldir_t filldir)
 	}
 	return 0;
 }
-
 
 const struct file_operations sysfs_dir_operations = {
 	.read		= generic_read_dir,

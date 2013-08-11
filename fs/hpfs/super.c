@@ -552,7 +552,13 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	sbi->sb_cp_table = NULL;
 	sbi->sb_c_bitmap = -1;
 	sbi->sb_max_fwd_alloc = 0xffffff;
-	
+
+	if (sbi->sb_fs_size >= 0x80000000) {
+		hpfs_error(s, "invalid size in superblock: %08x",
+			(unsigned)sbi->sb_fs_size);
+		goto bail4;
+	}
+
 	/* Load bitmap directory */
 	if (!(sbi->sb_bmp_dir = hpfs_load_bitmap_directory(s, le32_to_cpu(superblock->bitmaps))))
 		goto bail4;
@@ -625,11 +631,9 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	hpfs_init_inode(root);
 	hpfs_read_inode(root);
 	unlock_new_inode(root);
-	s->s_root = d_alloc_root(root);
-	if (!s->s_root) {
-		iput(root);
+	s->s_root = d_make_root(root);
+	if (!s->s_root)
 		goto bail0;
-	}
 
 	/*
 	 * find the root directory's . pointer & finish filling in the inode

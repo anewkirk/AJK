@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -87,7 +87,7 @@ static int pre_allocated_memory_size_current  = 0;
 #ifdef MALI_OS_MEMORY_KERNEL_BUFFER_SIZE_IN_MB
 	static int pre_allocated_memory_size_max      = MALI_OS_MEMORY_KERNEL_BUFFER_SIZE_IN_MB * 1024 * 1024;
 #else
-	static int pre_allocated_memory_size_max      = 6 * 1024 * 1024; /* 6 MiB */
+	static int pre_allocated_memory_size_max      = 24 * 1024 * 1024; /* 6 MiB */
 #endif
 
 static struct vm_operations_struct mali_kernel_vm_ops =
@@ -124,9 +124,9 @@ static u32 _kernel_page_allocate(void)
 {
 	struct page *new_page;
 	u32 linux_phys_addr;
-	
+
 	new_page = alloc_page(GFP_HIGHUSER | __GFP_ZERO | __GFP_REPEAT | __GFP_NOWARN | __GFP_COLD);
-	
+
 	if ( NULL == new_page )
 	{
 		return 0;
@@ -145,7 +145,7 @@ static void _kernel_page_release(u32 physical_address)
 	#if 1
 	dma_unmap_page(NULL, physical_address, PAGE_SIZE, DMA_BIDIRECTIONAL);
 	#endif
-	
+
 	unmap_page = pfn_to_page( physical_address >> PAGE_SHIFT );
 	MALI_DEBUG_ASSERT_POINTER( unmap_page );
 	__free_page( unmap_page );
@@ -155,19 +155,19 @@ static AllocationList * _allocation_list_item_get(void)
 {
 	AllocationList *item = NULL;
 	unsigned long flags;
-	
+
 	spin_lock_irqsave(&allocation_list_spinlock,flags);
 	if ( pre_allocated_memory )
 	{
 		item = pre_allocated_memory;
 		pre_allocated_memory = pre_allocated_memory->next;
 		pre_allocated_memory_size_current -= PAGE_SIZE;
-		
+
 		spin_unlock_irqrestore(&allocation_list_spinlock,flags);
 		return item;
 	}
 	spin_unlock_irqrestore(&allocation_list_spinlock,flags);
-	
+
 	item = _mali_osk_malloc( sizeof(AllocationList) );
 	if ( NULL == item)
 	{
@@ -197,7 +197,7 @@ static void _allocation_list_item_release(AllocationList * item)
 		return;
 	}
 	spin_unlock_irqrestore(&allocation_list_spinlock,flags);
-	
+
 	_kernel_page_release(item->physaddr);
 	_mali_osk_free( item );
 }
@@ -409,7 +409,7 @@ _mali_osk_errcode_t _mali_osk_mem_mapregion_init( mali_memory_allocation * descr
 	  The memory is reserved, meaning that it's present and can never be paged out (see also previous entry)
 	*/
 	vma->vm_flags |= VM_IO;
-	vma->vm_flags |= VM_RESERVED;
+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
 	vma->vm_flags |= VM_DONTCOPY;
 
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
@@ -569,6 +569,7 @@ void _mali_osk_mem_mapregion_unmap( mali_memory_allocation * descriptor, u32 off
 			/* First find the allocation in the list of allocations */
 			AllocationList *alloc = mappingInfo->list;
 			AllocationList **prev = &(mappingInfo->list);
+
 			while (NULL != alloc && alloc->offset != offset)
 			{
 				prev = &(alloc->next);

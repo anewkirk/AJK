@@ -56,7 +56,7 @@
  */
 
 #include <linux/kernel.h>
-#include <asm/bitops.h>
+#include <asm/cmpxchg.h>
 
 struct llist_head {
 	struct llist_node *first;
@@ -147,7 +147,7 @@ static inline struct llist_node *llist_next(struct llist_node *node)
  * @new:	new entry to be added
  * @head:	the head for your lock-less list
  *
- * Return whether list is empty before adding.
+ * Returns true if the list was empty prior to adding this entry.
  */
 static inline bool llist_add(struct llist_node *new, struct llist_head *head)
 {

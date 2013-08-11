@@ -1051,7 +1051,7 @@ static void destroy_inodecache(void)
 void ext4_clear_inode(struct inode *inode)
 {
 	invalidate_inode_buffers(inode);
-	end_writeback(inode);
+	clear_inode(inode);
 	dquot_drop(inode);
 	ext4_discard_preallocations(inode);
 	if (EXT4_I(inode)->jinode) {
@@ -3845,9 +3845,8 @@ no_journal:
 		iput(root);
 		goto failed_mount4;
 	}
-	sb->s_root = d_alloc_root(root);
+	sb->s_root = d_make_root(root);
 	if (!sb->s_root) {
-		iput(root);
 		ext4_msg(sb, KERN_ERR, "get root dentry failed");
 		ret = -ENOMEM;
 		goto failed_mount4;
@@ -4417,6 +4416,11 @@ static int ext4_sync_fs(struct super_block *sb, int wait)
 
 	trace_ext4_sync_fs(sb, wait);
 	flush_workqueue(sbi->dio_unwritten_wq);
+	/*
+	 * Writeback quota in non-journalled quota case - journalled quota has
+	 * no dirty dquots
+	 */
+	dquot_writeback_dquots(sb, -1);
 	if (jbd2_journal_start_commit(sbi->s_journal, &target)) {
 		if (wait)
 			jbd2_log_wait_commit(sbi->s_journal, target);

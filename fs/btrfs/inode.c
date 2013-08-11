@@ -32,6 +32,7 @@
 #include <linux/writeback.h>
 #include <linux/statfs.h>
 #include <linux/compat.h>
+#include <linux/aio.h>
 #include <linux/bit_spinlock.h>
 #include <linux/xattr.h>
 #include <linux/posix_acl.h>
@@ -3675,7 +3676,7 @@ void btrfs_evict_inode(struct inode *inode)
 	btrfs_end_transaction(trans, root);
 	btrfs_btree_balance_dirty(root, nr);
 no_delete:
-	end_writeback(inode);
+	clear_inode(inode);
 	return;
 }
 

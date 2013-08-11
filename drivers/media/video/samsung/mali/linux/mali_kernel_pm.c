@@ -21,6 +21,7 @@
 #endif /* CONFIG_PM_RUNTIME */
 
 #include <linux/platform_device.h>
+#include <linux/module.h>
 #include <linux/version.h>
 #include <asm/current.h>
 #include <linux/suspend.h>

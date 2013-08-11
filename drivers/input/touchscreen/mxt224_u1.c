@@ -98,9 +98,8 @@
 #define MAX_USING_FINGER_NUM 		10
 
 #define MXT224_AUTOCAL_WAIT_TIME	2000
-// no debug !!!
+/* no debug !!! */
 #define printk(arg, ...)
-#define TOUCH_LOCK_FREQ 		500000
 
 #if defined(U1_EUR_TARGET)
 static bool gbfilter;
@@ -248,8 +247,6 @@ DECLARE_WAIT_QUEUE_HEAD(gestures_wq);
 static spinlock_t gestures_lock;
 #endif
 
-int lock_dyn = 0;
-
 #define CLEAR_MEDIAN_FILTER_ERROR
 struct mxt224_data *copy_data;
 int touch_is_pressed;
@@ -260,6 +257,7 @@ static void mxt224_optical_gain(uint16_t dbg_mode);
 static struct input_dev *slide2wake_dev;
 extern void request_suspend_state(int);
 extern int get_suspend_state(void);
+static bool slide2wake_call = false;
 static struct wake_lock wl_s2w;
 bool s2w_enabled = false;
 static unsigned int wake_start = -1;
@@ -506,7 +504,6 @@ static int check_abs_time(void)
 		return 1;
 	else
 		return 0;
-
 }
 
 static int check_abs_time_freq_err(void)
@@ -520,7 +517,6 @@ static int check_abs_time_freq_err(void)
 		return 1;
 	else
 		return 0;
-
 }
 
 static void mxt224_ta_probe(bool ta_status)
@@ -585,25 +581,25 @@ static void mxt224_ta_probe(bool ta_status)
 					    TOUCH_MULTITOUCHSCREEN_T9,
 					    &size_one, &obj_address);
 			size_one = 1;
-			/*blen */
+			/* blen */
 			value = copy_data->blen_batt_e;
 			register_address = 6;
 			write_mem(copy_data,
 				  obj_address + (u16) register_address,
 				  size_one, &value);
-			/*threshold */
+			/* threshold */
 			value = copy_data->threshold_e;
 			register_address = 7;
 			write_mem(copy_data,
 				  obj_address + (u16) register_address,
 				  size_one, &value);
-			/*move Filter */
+			/* move Filter */
 			value = copy_data->movfilter_batt_e;
 			register_address = 13;
 			write_mem(copy_data,
 				  obj_address + (u16) register_address,
 				  size_one, &value);
-			/*nexttchdi*/
+			/* nexttchdi */
 			value = copy_data->nexttchdi_e;
 			register_address = 34;
 			write_mem(copy_data,
@@ -876,7 +872,7 @@ void check_chip_calibration(unsigned char one_touch_input_flag)
 			}
 		}
 
-		printk(KERN_ERR "[TSP] t: %d, a: %d\n", tch_ch, atch_ch);
+		pr_debug("[TSP] t: %d, a: %d\n", tch_ch, atch_ch);
 
 		/* send page up command so we can detect
 		when data updates next time, page byte will sit at 1
@@ -924,9 +920,9 @@ void check_chip_calibration(unsigned char one_touch_input_flag)
 						    &size,
 						    &object_address);
 
-				/* change calibration suspend settings to zero
-				until calibration confirmed good */
-				/* store normal settings */
+					/* change calibration suspend settings to zero
+					until calibration confirmed good */
+					/* store normal settings */
 					size = 1;
 					copy_data->palm_chk_flag = 2;
 
@@ -1335,8 +1331,6 @@ static void report_input_data(struct mxt224_data *data)
 	static unsigned int level = ~0;
 	bool tsp_state = false;
 	bool check_press = false;
-	int64_t nr_running_tmp = 0;
-	unsigned int new_lock_freq = 0;
 	u16 object_address = 0;
 	u16 size = 1;
 	u8 value;
@@ -1353,27 +1347,8 @@ static void report_input_data(struct mxt224_data *data)
 #endif
 	touch_is_pressed = 0;
 
-	if (lock_dyn == 1) {
-		nr_running_tmp = nr_running();
-		if (level == ~0 && nr_running_tmp > 1) {
-			nr_running_tmp = nr_running_tmp << 1;
-			new_lock_freq = TOUCH_LOCK_FREQ / 10 * nr_running_tmp;
-	
-			for (i=100000; i <= 1000000; i=i+100000) {
-				if (new_lock_freq <= i ) {
-					break;
-				}
-				new_lock_freq = i;
-			}
-
-			printk("touch-feq | old: TOUCH_LOCK_FREQ -> new: %u\n", new_lock_freq);
-			exynos_cpufreq_get_level(new_lock_freq, &level);
-		}
-	}
-	else {
-		if (level == ~0)
-			exynos_cpufreq_get_level(TOUCH_LOCK_FREQ, &level);
-	}
+	if (level == ~0)
+		exynos_cpufreq_get_level(500000, &level);
 
 	for (i = 0; i < data->num_fingers; i++) {
 		if (TSP_STATE_INACTIVE == data->fingers[i].z)
@@ -1593,12 +1568,13 @@ static void report_input_data(struct mxt224_data *data)
 		// Check completed gestures or reset all progress if all fingers released
 		spin_lock_irqsave(&gestures_lock, flags);
 		for (gesture_no = 0; gesture_no <= max_configured_gesture; gesture_no++) {
+			/* Gesture already reported, skip */
 			if (gestures_detected[gesture_no])
-				// Gesture already reported, skip
 				continue;
 
+			/* Gesture not configured */
 			if (gestures_step_count[gesture_no][0] < 1)
-				continue; // Gesture not configured
+				continue;
 
 			fingers_completed = true;
 			for (finger_no = 0; finger_no <= max_gesture_finger[gesture_no]; finger_no++) {
@@ -1637,7 +1613,6 @@ static void report_input_data(struct mxt224_data *data)
 				DVFS_LOCK_ID_TSP,
 				level);
 			copy_data->lock_status = 1;
-			level = ~0;
 		}
 #ifdef CONFIG_KEYBOARD_CYPRESS_AOKP
 		if (flash_timeout)
@@ -1683,8 +1658,9 @@ void palm_recovery(void)
 			atchcalst_tmp = 0;
 			atchcalsthr_tmp = 0;
 
+			/* TCHAUTOCAL */
 			ret = write_mem(copy_data, obj_address + 4, 1,
-				&atchcalst_tmp);	/* TCHAUTOCAL */
+				&atchcalst_tmp);
 
 			ret =
 			    write_mem(copy_data, obj_address + 6, 1,
@@ -1693,13 +1669,16 @@ void palm_recovery(void)
 			    write_mem(copy_data, obj_address + 7, 1,
 				      &atchcalsthr_tmp);
 
-			if (copy_data->family_id == 0x81) {	/* mxT224E */
+			/* mxT224E */
+			if (copy_data->family_id == 0x81) {
+				/* forced cal thr */
 				ret = write_mem(copy_data,
 				obj_address + 8, 1,
-				&atchcalst_tmp);	/* forced cal thr  */
+				&atchcalst_tmp);
+				/* forced cal ratio */
 				ret1 = write_mem(copy_data,
 				obj_address + 9, 1,
-				&atchcalsthr_tmp);	/* forced cal ratio */
+				&atchcalsthr_tmp);
 			}
 		}
 	}
@@ -1795,8 +1774,8 @@ static int Check_Err_Condition(void)
 	switch (copy_data->gErrCondition) {
 	case ERR_RTN_CONDITION_IDLE:
 	default:
-			rtn = ERR_RTN_CONDITION_T9;
-			break;
+		rtn = ERR_RTN_CONDITION_T9;
+		break;
 	}
 	return rtn;
 }
@@ -1874,7 +1853,7 @@ static void median_err_setting(void)
 				    get_object_info(copy_data,
 						    SPT_CTECONFIG_T46,
 						    &size_one, &obj_address);
-				value = 48; /*32;*/
+				value = 48;  /* 32; */
 				write_mem(copy_data, obj_address + 3, 1,
 					  &value);
 				ret |=
@@ -1902,13 +1881,15 @@ static void median_err_setting(void)
 				value = 100; /*38;*/
 				write_mem(copy_data, obj_address + 25, 1,
 					  &value);
+#if 0
 				value = 16;
 				write_mem(copy_data, obj_address + 34, 1,
 					  &value);
+#endif
 				value = 40;
 				write_mem(copy_data, obj_address + 35, 1,
 					  &value);
-				value = 81; /* 80;*/
+				value = 81; /* 80; */
 				write_mem(copy_data, obj_address + 39, 1,
 					  &value);
 #endif
@@ -1959,8 +1940,8 @@ static void median_err_setting(void)
 			copy_data->noise_median.t46_actvsyncsperx_for_mferr;
 				write_mem(copy_data, obj_address + 3, 1,
 					  &value);
-	} else if (state >= 2) {
-		value = 10;
+			} else if (state >= 2) {
+				value = 10;
 				write_mem(copy_data, obj_address + 3, 1,
 					  &value);
 				value = 0;	/* secondmf */
@@ -2016,14 +1997,17 @@ static irqreturn_t mxt224_irq_thread(int irq, void *ptr)
 			return IRQ_HANDLED;
 
 		if ((msg[0] == 0x1) &&
-			((msg[1] & 0x10) == 0x10)) {	/* caliration */
+			((msg[1] & 0x10) == 0x10)) {
+			/* caliration */
 			printk(KERN_ERR "[TSP] Calibration!!!!!!\n");
 			Doing_calibration_flag = 1;
 		} else if ((msg[0] == 0x1) &&
-			((msg[1] & 0x40) == 0x40)) { /* overflow */
+			((msg[1] & 0x40) == 0x40)) {
+			/* overflow */
 			printk(KERN_ERR "[TSP] Overflow!!!!!!");
 		} else if ((msg[0] == 0x1) &&
-			((msg[1] & 0x10) == 0x00)) {	/* caliration */
+			((msg[1] & 0x10) == 0x00)) {
+			/* caliration */
 			printk(KERN_ERR "[TSP] Calibration End!!!!!!\n");
 
 			Doing_calibration_flag = 0;
@@ -2041,10 +2025,12 @@ static irqreturn_t mxt224_irq_thread(int irq, void *ptr)
 		}
 
 		if ((msg[0] == 14) && (copy_data->family_id == 0x80)) {
-			if ((msg[1] & 0x01) == 0x00) {/* Palm release */
+			if ((msg[1] & 0x01) == 0x00) {
+				/* Palm release */
 				printk(KERN_ERR "[TSP] Palm release");
 				touch_is_pressed = 0;
-			} else if ((msg[1] & 0x01) == 0x01) {/* Palm Press */
+			} else if ((msg[1] & 0x01) == 0x01) {
+				/* Palm Press */
 				printk(KERN_ERR "[TSP] Palm Press");
 				touch_is_pressed = 1;
 				touch_message_flag = 1;
@@ -2112,16 +2098,20 @@ static irqreturn_t mxt224_irq_thread(int irq, void *ptr)
 				printk(KERN_ERR
 				       "[TSP] Calibrate on Ghost touch");
 				calibrate_chip();
-			copy_data->touch_is_pressed_arr[msg[0] - 2] = 0;
+				copy_data->touch_is_pressed_arr[msg[0] - 2] = 0;
 			}
 
-			if ((msg[1] & 0x20) == 0x20) {	/* Release */
-			/* touch_is_pressed = 0; */
-			/* copy_data->touch_is_pressed_arr[msg[0]-2] = 0; */
-
-			} else if ((msg[1] & 0x90) == 0x90) {/*Detect & Move*/
+			if ((msg[1] & 0x20) == 0x20) {
+				/* Release */
+			/* 
+				touch_is_pressed = 0; 
+				copy_data->touch_is_pressed_arr[msg[0]-2] = 0;
+			*/
+			} else if ((msg[1] & 0x90) == 0x90) {
+				/* Detect & Move */
 				touch_message_flag = 1;
-			} else if ((msg[1] & 0xC0) == 0xC0) {/*Detect & Press*/
+			} else if ((msg[1] & 0xC0) == 0xC0) {
+				/* Detect & Press */
 				touch_message_flag = 1;
 			}
 
@@ -2131,7 +2121,7 @@ static irqreturn_t mxt224_irq_thread(int irq, void *ptr)
 				data->fingers[id].z = TSP_STATE_RELEASE;
 				data->fingers[id].w = msg[5];
 				data->finger_mask |= 1U << id;
-			copy_data->touch_is_pressed_arr[msg[0] - 2] = 0;
+				copy_data->touch_is_pressed_arr[msg[0] - 2] = 0;
 				copy_data->touch_state = 1;
 			} else if ((msg[1] & DETECT_MSG_MASK)
 				   && (msg[1] &
@@ -2289,8 +2279,9 @@ static void reset_gestures_detection_locked(bool including_detected)
 
 		gestures_detected[gesture_no] = false;
 
+		// Gesture not configured
 		if (gestures_step_count[gesture_no][0] < 1)
-			continue; // Gesture not configured
+			continue;
 
 		// Reset progress for all paths of this gesture
 		for (finger_no = 0; finger_no <= max_gesture_finger[gesture_no]; finger_no++) {
@@ -2347,9 +2338,9 @@ static void mxt224_late_resume(struct early_suspend *h)
 	bool ta_status = 0;
 
 	mxt224_internal_resume(data);
-	if (s2w_enabled)
+	if (s2w_enabled) {
 		disable_irq_wake(data->client->irq);
-	else
+	} else
 		enable_irq(data->client->irq);
 
 	copy_data->mxt224_enabled = 1;
@@ -2457,7 +2448,6 @@ static ssize_t qt602240_object_setting(struct device *dev,
 	       object_register, val);
 
 	return count;
-
 }
 
 static ssize_t qt602240_object_show(struct device *dev,
@@ -2622,7 +2612,6 @@ int read_all_data(uint16_t dbg_mode)
 	ret =
 	    get_object_info(copy_data, DEBUG_DIAGNOSTIC_T37, &size,
 			    &object_address);
-/*jerry no need to leave it */
 #if 0
 	for (i = 0; i < 5; i++) {
 		if (data_buffer[0] == dbg_mode)
@@ -2668,6 +2657,7 @@ int read_all_data(uint16_t dbg_mode)
 			if (data_buffer[0] != 0) {
 				if (qt_refrence_node[num] > max_value)
 					max_value = qt_refrence_node[num];
+
 				if (qt_refrence_node[num] < min_value)
 					min_value = qt_refrence_node[num];
 			}
@@ -2713,7 +2703,6 @@ int read_all_delta_data(uint16_t dbg_mode)
 	ret =
 	    get_object_info(copy_data, DEBUG_DIAGNOSTIC_T37, &size,
 			    &object_address);
-/*jerry no need to leave it */
 #if 0
 	for (i = 0; i < 5; i++) {
 		if (data_buffer[0] == dbg_mode)
@@ -2775,7 +2764,6 @@ static void mxt224_optical_gain(uint16_t dbg_mode)
 	ret =
 	    get_object_info(copy_data, DEBUG_DIAGNOSTIC_T37, &size,
 			    &object_address);
-/*jerry no need of it*/
 #if 0
 	for (i = 0; i < 5; i++) {
 		if (data_buffer[0] == dbg_mode)
@@ -2814,6 +2802,7 @@ static void mxt224_optical_gain(uint16_t dbg_mode)
 #else
 			if (copy_data->family_id == 0x81)
 				qt_refrence = qt_refrence - 16384;
+
 			if (qt_refrence > 14500)
 				reference_over = 1;
 #endif
@@ -2968,7 +2957,7 @@ static int mxt224_load_fw(struct device *dev, const char *fn)
 			((*(fw->data + pos) << 8) | *(fw->data + pos + 1));
 
 		/* We should add 2 at frame size
-		as the the firmware data is not
+		 * as the the firmware data is not
 		 * included the CRC bytes.
 		 */
 		frame_size += 2;
@@ -3138,8 +3127,10 @@ static int atoi(const char *str)
 {
 	int result = 0;
 	int count = 0;
+
 	if (str == NULL)
 		return -1;
+
 	while (str[count] != '\0' && str[count] >= '0' && str[count] <= '9') {
 		result = result * 10 + str[count] - '0';
 		++count;
@@ -3151,9 +3142,11 @@ ssize_t disp_all_refdata_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
 
-/*	int status = 0;
+/*	
+	int status = 0;
 	char tempStr[5*209 + 1] = { 0 };
-	nt i = 0;*/
+	nt i = 0;
+*/
 	return sprintf(buf, "%u\n", qt_refrence_node[index_reference]);
 }
 
@@ -3161,7 +3154,6 @@ ssize_t disp_all_refdata_store(struct device *dev,
 			       struct device_attribute *attr, const char *buf,
 			       size_t size)
 {
-
 	index_reference = atoi(buf);
 	return size;
 }
@@ -3194,7 +3186,6 @@ ssize_t disp_all_deltadata_store(struct device *dev,
 				 struct device_attribute *attr,
 				 const char *buf, size_t size)
 {
-
 	index_delta = atoi(buf);
 	return size;
 }
@@ -3202,9 +3193,7 @@ ssize_t disp_all_deltadata_store(struct device *dev,
 static ssize_t set_firm_version_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
-
 	return sprintf(buf, "%#02x\n", copy_data->tsp_version_disp);
-
 }
 
 static ssize_t set_module_off_show(struct device *dev,
@@ -3380,13 +3369,19 @@ static ssize_t touch_config_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "[Battery]  touchthresh: %u noisethresh: %u movfilter: %u\n"
-			    "[Charging] touchthresh: %u noisethresh: %u movfilter: %u\n",
+			    "[Charging] touchthresh: %u noisethresh: %u movfilter: %u\n"
+			    "[Battery-E] touchthresh_e: %u movfilter_e: %u\n"
+			    "[Charging-E] touchthresh_e: %u movfilter_e: %u\n",
 					copy_data->tchthr_batt,
 					copy_data->noisethr_batt,
 					copy_data->movfilter_batt,
 					copy_data->tchthr_charging,
 					copy_data->noisethr_charging,
-					copy_data->movfilter_charging);
+					copy_data->movfilter_charging,
+					copy_data->tchthr_batt_e,
+					copy_data->movfilter_batt_e,
+					copy_data->tchthr_charging_e,
+					copy_data->movfilter_charging_e);
 }
 
 static ssize_t touch_config_store(struct device *dev,
@@ -3394,14 +3389,15 @@ static ssize_t touch_config_store(struct device *dev,
 				   const char *buf, size_t size)
 {
 	int ret = 0;
-	unsigned int value[6];
+	unsigned int value[10];
 	bool ta_status = 0;
 
-	ret = sscanf(buf, "%d %d %d %d %d %d\n",
+	ret = sscanf(buf, "%d %d %d %d %d %d %d %d %d %d\n",
 		&value[0], &value[1], &value[2],
-			&value[3], &value[4], &value[5]);
+			&value[3], &value[4], &value[5],
+			&value[6], &value[7], &value[8], &value[9]);
 
-	if (ret != 6) {
+	if (ret != 10) {
 		return -EINVAL;
 	} else {
 		copy_data->tchthr_batt = (u8) value[0];
@@ -3410,6 +3406,10 @@ static ssize_t touch_config_store(struct device *dev,
 		copy_data->tchthr_charging = (u8) value[3];
 		copy_data->noisethr_charging = (u8) value[4];
 		copy_data->movfilter_charging = (u8) value[5];
+		copy_data->tchthr_batt_e = (u8) value[6];
+		copy_data->movfilter_batt_e = (u8) value[7];
+		copy_data->tchthr_charging_e = (u8) value[8];
+		copy_data->movfilter_charging_e = (u8) value[9];
 	}
 
 	if (copy_data->read_ta_status) {
@@ -3425,16 +3425,22 @@ void tsp_touch_config_update(int status)
 	u8 touch_threshold;
 	u8 mov_filter;
 	u8 noise_threshold;
+	u8 touch_threshold_e;
+	u8 mov_filter_e;
 	bool ta_status = 0;
 
 	if (status > 0) {
 		touch_threshold = copy_data->tchthr_charging;
 		noise_threshold = copy_data->noisethr_charging;
 		mov_filter = copy_data->movfilter_charging;
+		touch_threshold_e = copy_data->tchthr_charging_e;
+		mov_filter_e = copy_data->movfilter_charging_e;
 	} else {
 		touch_threshold = copy_data->tchthr_batt;
 		noise_threshold = copy_data->noisethr_batt;
 		mov_filter = copy_data->movfilter_batt;
+		touch_threshold_e = copy_data->tchthr_batt_e;
+		mov_filter_e = copy_data->movfilter_batt_e;
 	}
 
 	if (copy_data->read_ta_status) {
@@ -3473,6 +3479,7 @@ ssize_t set_tsp_for_inputmethod_show(struct device *dev,
 {
 	printk(KERN_ERR "[TSP] %s is called.. is_inputmethod=%d\n", __func__,
 	       copy_data->is_inputmethod);
+
 	if (copy_data->is_inputmethod)
 		*buf = '1';
 	else
@@ -3581,31 +3588,6 @@ static ssize_t tsp_touchtype_show(struct device *dev,
 	return strlen(buf);
 }
 
-static ssize_t touch_lock_dyn_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%u\n", lock_dyn);
-}
-
-static ssize_t touch_lock_dyn_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t size)
-{
-	int ret;
-	unsigned int value;
-
-	ret = sscanf(buf, "%d\n", &value);
-
-	if (ret != 1)
-		return -EINVAL;
-	else
-		if (value > 0)
-			lock_dyn = 1;
-		else
-			lock_dyn = 0;
-
-	return size;
-}
 
 static ssize_t slide2wake_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
@@ -3628,6 +3610,44 @@ static ssize_t slide2wake_store(struct device *dev,
 	s2w_enabled = value ? true : false;
 	mxt224_gpio_sleep_mode(s2w_enabled);
 
+	return size;
+}
+
+static ssize_t slide2wake_call_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", slide2wake_call);
+}
+
+static ssize_t slide2wake_call_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t size)
+{
+	int ret;
+	unsigned int value;
+	struct mxt224_data *data = copy_data;
+
+
+	ret = sscanf(buf, "%d\n", &value);
+
+	if (ret != 1)
+		return -EINVAL;
+
+	slide2wake_call = value ? true : false;
+
+	if (s2w_enabled) {
+		if (slide2wake_call) {
+			touch_is_pressed = 0;
+			copy_data->mxt224_enabled = 0;
+			disable_irq(data->client->irq);
+			printk(KERN_INFO "slide2wake: call detected, touch screen is off\n");
+		} else {
+			copy_data->mxt224_enabled = 1;
+			touch_is_pressed = 0;
+			enable_irq(data->client->irq);
+			printk(KERN_INFO "slide2wake: no call detected, touch screen is on\n");
+		}
+	}
 	return size;
 }
 
@@ -3697,13 +3717,13 @@ static DEVICE_ATTR(set_module_on, S_IRUGO | S_IWUSR | S_IWGRP,
 	20110222 N1 firmware sync
 */
 static DEVICE_ATTR(tsp_firm_update, S_IRUGO | S_IWUSR | S_IWGRP,
-	set_mxt_update_show, NULL);/* firmware update */
+		   set_mxt_update_show, NULL);/* firmware update */
 static DEVICE_ATTR(tsp_firm_update_status, S_IRUGO | S_IWUSR | S_IWGRP,
-	set_mxt_firm_status_show, NULL);/* firmware update status return */
+		   set_mxt_firm_status_show, NULL);/* firmware update status return */
 static DEVICE_ATTR(tsp_threshold, S_IRUGO | S_IWUSR | S_IWGRP,
-	tsp_threshold_show, tsp_threshold_store);/* threshold return, store */
+	 	   tsp_threshold_show, tsp_threshold_store);/* threshold return, store */
 static DEVICE_ATTR(tsp_firm_version_phone, S_IRUGO | S_IWUSR | S_IWGRP,
-	set_mxt_firm_version_show, NULL);	/* PHONE */
+		   set_mxt_firm_version_show, NULL);	/* PHONE */
 static DEVICE_ATTR(tsp_firm_version_panel, S_IRUGO | S_IWUSR | S_IWGRP,
 		   set_mxt_firm_version_read_show, NULL);/*PART*/
 static DEVICE_ATTR(tsp_config_version, S_IRUGO | S_IWUSR | S_IWGRP,
@@ -3712,7 +3732,7 @@ static DEVICE_ATTR(tsp_config_version, S_IRUGO | S_IWUSR | S_IWGRP,
 #ifdef CONFIG_TARGET_LOCALE_KOR
 /* For 3x4 Input Method, Jump limit changed API */
 static DEVICE_ATTR(set_tsp_for_inputmethod, S_IRUGO | S_IWUSR | S_IWGRP,
-	set_tsp_for_inputmethod_show, set_tsp_for_inputmethod_store);
+		   set_tsp_for_inputmethod_show, set_tsp_for_inputmethod_store);
 #endif
 static DEVICE_ATTR(tsp_touchtype, S_IRUGO | S_IWUSR | S_IWGRP,
 		   tsp_touchtype_show, NULL);
@@ -3725,15 +3745,15 @@ static DEVICE_ATTR(object_write, S_IRUGO | S_IWUSR | S_IWGRP, NULL,
 static DEVICE_ATTR(dbg_switch, S_IRUGO | S_IWUSR | S_IWGRP, NULL,
 		   mxt224_debug_setting);
 static DEVICE_ATTR(tsp_touch_config, S_IRUGO | S_IWUSR | S_IWGRP,
-	touch_config_show, touch_config_store);
-static DEVICE_ATTR(tsp_touch_dyn, S_IRUGO | S_IWUSR | S_IWGRP,
-	touch_lock_dyn_show, touch_lock_dyn_store);
+		   touch_config_show, touch_config_store);
 #ifdef CONFIG_KEYBOARD_CYPRESS_AOKP
 static DEVICE_ATTR(tsp_flash_timeout, S_IRUGO | S_IWUSR | S_IWGRP,
-	led_flash_timeout_show, led_flash_timeout_store);
+		   led_flash_timeout_show, led_flash_timeout_store);
 #endif
 static DEVICE_ATTR(tsp_slide2wake, S_IRUGO | S_IWUSR | S_IWGRP,
-	slide2wake_show, slide2wake_store);
+		   slide2wake_show, slide2wake_store);
+static DEVICE_ATTR(tsp_slide2wake_call, S_IRUGO | S_IWUSR | S_IWGRP,
+		   slide2wake_call_show, slide2wake_call_store);
 
 static int sec_touchscreen_enable(struct mxt224_data *data)
 {
@@ -3969,7 +3989,7 @@ static ssize_t wait_for_gesture_show(struct device *dev,
 	// Does not stop if there's a gesture already reported
 	ret = wait_event_interruptible(gestures_wq,
                                        has_gestures);
-        if (ret)
+	if (ret)
 		return ret; // Interrupted
 
 	s = buf;
@@ -4052,18 +4072,19 @@ static ssize_t gestures_enabled_store(struct device *dev,
 
 	if (data == 0)
 		reset_gestures_detection(true);
+
 	gestures_enabled = (data == 1);
 
-        return size;
+	return size;
 }
 
 
 static DEVICE_ATTR(gesture_patterns, S_IRUGO | S_IWUSR,
-                   gesture_patterns_show, gesture_patterns_store);
+		   gesture_patterns_show, gesture_patterns_store);
 static DEVICE_ATTR(wait_for_gesture, S_IRUGO | S_IWUSR,
-                   wait_for_gesture_show, wait_for_gesture_store);
+		   wait_for_gesture_show, wait_for_gesture_store);
 static DEVICE_ATTR(gestures_enabled, S_IRUGO | S_IWUSR,
-                   gestures_enabled_show, gestures_enabled_store);
+		   gestures_enabled_show, gestures_enabled_store);
 
 static struct attribute *gestures_attrs[] = {
 	&dev_attr_gesture_patterns.attr,
@@ -4420,9 +4441,6 @@ static int __devinit mxt224_probe(struct i2c_client *client,
 		printk(KERN_ERR "Failed to create device file(%s)!\n",
 		       dev_attr_tsp_touch_config.attr.name);
 
-	if (device_create_file(sec_touchscreen, &dev_attr_tsp_touch_dyn) < 0)
-		printk(KERN_ERR "Failed to create device file(%s)!\n",
-			dev_attr_tsp_touch_dyn.attr.name);
 
 #ifdef CONFIG_KEYBOARD_CYPRESS_AOKP
 	if (device_create_file(sec_touchscreen, &dev_attr_tsp_flash_timeout) < 0)
@@ -4433,6 +4451,10 @@ static int __devinit mxt224_probe(struct i2c_client *client,
 	if (device_create_file(sec_touchscreen, &dev_attr_tsp_slide2wake) < 0)
 		printk(KERN_ERR "Failed to create device file(%s)!\n",
 		       dev_attr_tsp_slide2wake.attr.name);
+
+	if (device_create_file(sec_touchscreen, &dev_attr_tsp_slide2wake_call) < 0)
+		printk(KERN_ERR "Failed to create device file(%s)!\n",
+			dev_attr_tsp_slide2wake_call.attr.name);
 
 	if (device_create_file
 	    (sec_touchscreen, &dev_attr_tsp_firm_version_phone) < 0)
@@ -4618,7 +4640,7 @@ static struct i2c_driver mxt224_i2c_driver = {
 		   .owner = THIS_MODULE,
 		   .name = MXT224_DEV_NAME,
 		   .pm = &mxt224_pm_ops,
-		   },
+	},
 };
 
 static int __init mxt224_init(void)

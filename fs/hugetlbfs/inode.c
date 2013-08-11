@@ -1,7 +1,7 @@
 /*
  * hugetlbpage-backed filesystem.  Based on ramfs.
  *
- * William Irwin, 2002
+ * Nadia Yvette Chambers, 2002
  *
  * Copyright (C) 2002 Linus Torvalds.
  */
@@ -91,7 +91,7 @@ static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	 * way when do_mmap_pgoff unwinds (may be important on powerpc
 	 * and ia64).
 	 */
-	vma->vm_flags |= VM_HUGETLB | VM_RESERVED;
+	vma->vm_flags |= VM_HUGETLB | VM_DONTEXPAND | VM_DONTDUMP;
 	vma->vm_ops = &hugetlb_vm_ops;
 
 	if (vma->vm_pgoff & (~huge_page_mask(h) >> PAGE_SHIFT))
@@ -367,7 +367,7 @@ static void truncate_hugepages(struct inode *inode, loff_t lstart)
 static void hugetlbfs_evict_inode(struct inode *inode)
 {
 	truncate_hugepages(inode, 0);
-	end_writeback(inode);
+	clear_inode(inode);
 }
 
 static inline void
@@ -816,8 +816,6 @@ bad_val:
 static int
 hugetlbfs_fill_super(struct super_block *sb, void *data, int silent)
 {
-	struct inode * inode;
-	struct dentry * root;
 	int ret;
 	struct hugetlbfs_config config;
 	struct hugetlbfs_sb_info *sbinfo;
@@ -850,6 +848,7 @@ hugetlbfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_magic = HUGETLBFS_MAGIC;
 	sb->s_op = &hugetlbfs_ops;
 	sb->s_time_gran = 1;
+<<<<<<< HEAD
 	inode = hugetlbfs_get_inode(sb, config.uid, config.gid,
 					S_IFDIR | config.mode, 0);
 	if (!inode)
@@ -858,9 +857,11 @@ hugetlbfs_fill_super(struct super_block *sb, void *data, int silent)
 	root = d_alloc_root(inode);
 	if (!root) {
 		iput(inode);
+=======
+	sb->s_root = d_make_root(hugetlbfs_get_root(sb, &config));
+	if (!sb->s_root)
+>>>>>>> 48fde70... switch open-coded instances of d_make_root() to new helper
 		goto out_free;
-	}
-	sb->s_root = root;
 	return 0;
 out_free:
 	kfree(sbinfo);
@@ -916,19 +917,29 @@ static int can_do_hugetlb_shm(void)
 
 static int get_hstate_idx(int page_size_log)
 {
-	struct hstate *h;
+	struct hstate *h = hstate_sizelog(page_size_log);
 
-	if (!page_size_log)
-		return default_hstate_idx;
-	h = size_to_hstate(1 << page_size_log);
 	if (!h)
 		return -1;
 	return h - hstates;
 }
 
-struct file *hugetlb_file_setup(const char *name, unsigned long addr,
-				size_t size, vm_flags_t acctflag,
-				struct user_struct **user,
+static char *hugetlb_dname(struct dentry *dentry, char *buffer, int buflen)
+{
+	return dynamic_dname(dentry, buffer, buflen, "/%s (deleted)",
+				dentry->d_name.name);
+}
+
+static struct dentry_operations anon_ops = {
+	.d_dname = hugetlb_dname
+};
+
+/*
+ * Note that size should be aligned to proper hugepage size in caller side,
+ * otherwise hugetlb_reserve_pages reserves one less hugepages than intended.
+ */
+struct file *hugetlb_file_setup(const char *name, size_t size,
+				vm_flags_t acctflag, struct user_struct **user,
 				int creat_flags, int page_size_log)
 {
 	struct file *file = ERR_PTR(-ENOMEM);
@@ -936,8 +947,6 @@ struct file *hugetlb_file_setup(const char *name, unsigned long addr,
 	struct path path;
 	struct dentry *root;
 	struct qstr quick_string;
-	struct hstate *hstate;
-	unsigned long num_pages;
 	int hstate_idx;
 
 	hstate_idx = get_hstate_idx(page_size_log);
@@ -973,7 +982,7 @@ struct file *hugetlb_file_setup(const char *name, unsigned long addr,
 	if (!inode)
 		goto out_dentry;
 
-	error = -ENOMEM;
+	file = ERR_PTR(-ENOMEM);
 	if (hugetlb_reserve_pages(inode, 0,
 			size >> huge_page_shift(hstate_inode(inode)), NULL,
 			acctflag))

@@ -5,6 +5,7 @@
 #define WRITEBACK_H
 
 #include <linux/sched.h>
+#include <linux/workqueue.h>
 #include <linux/fs.h>
 
 DECLARE_PER_CPU(int, dirty_throttle_leaks);
@@ -113,7 +114,6 @@ static inline void inode_sync_wait(struct inode *inode)
 	wait_on_bit(&inode->i_state, __I_SYNC, inode_wait,
 							TASK_UNINTERRUPTIBLE);
 }
-
 
 /*
  * mm/page-writeback.c

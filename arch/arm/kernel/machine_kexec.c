@@ -12,6 +12,7 @@
 #include <asm/mmu_context.h>
 #include <asm/cacheflush.h>
 #include <asm/mach-types.h>
+#include <asm/system_misc.h>
 
 extern const unsigned char relocate_new_kernel[];
 extern const unsigned int relocate_new_kernel_size;
@@ -86,6 +87,10 @@ void machine_kexec(struct kimage *image)
 	unsigned long reboot_code_buffer_phys;
 	void *reboot_code_buffer;
 
+	if (num_online_cpus() > 1) {
+		pr_err("kexec: error: multiple CPUs still online\n");
+		return;
+	}
 
 	page_list = image->head & PAGE_MASK;
 

@@ -33,6 +33,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/poll.h>
+#include <linux/aio.h>
 
 #include <linux/device.h>
 #include <linux/moduleparam.h>
@@ -538,7 +539,6 @@ static int ep_aio_cancel(struct kiocb *iocb, struct io_event *e)
 	local_irq_disable();
 	epdata = priv->epdata;
 	// spin_lock(&epdata->dev->lock);
-	kiocbSetCancelled(iocb);
 	if (likely(epdata && epdata->ep && priv->req))
 		value = usb_ep_dequeue (epdata->ep, priv->req);
 	else
@@ -652,7 +652,7 @@ fail:
 		goto fail;
 	}
 
-	iocb->ki_cancel = ep_aio_cancel;
+	kiocb_set_cancel_fn(iocb, ep_aio_cancel);
 	get_ep(epdata);
 	priv->epdata = epdata;
 	priv->actual = 0;
@@ -2069,9 +2069,8 @@ gadgetfs_fill_super (struct super_block *sb, void *opts, int silent)
 	if (!inode)
 		goto enomem0;
 	inode->i_op = &simple_dir_inode_operations;
-	if (!(d = d_alloc_root (inode)))
-		goto enomem1;
-	sb->s_root = d;
+	if (!(d = d_make_root (inode)))
+		goto Enomem;
 
 	/* the ep0 file is named after the controller we expect;
 	 * user mode code can use it for sanity checks, like we do.

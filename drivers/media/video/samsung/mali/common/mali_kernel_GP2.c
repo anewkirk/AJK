@@ -491,7 +491,7 @@ static void maligp_reset_hard( mali_core_renderunit *core )
 
 	mali_core_renderunit_register_write(core, reset_wait_target_register, reset_default_value); /* set it back to the default */
 	mali_core_renderunit_register_write(core, MALIGP2_REG_ADDR_MGMT_INT_CLEAR, MALIGP2_REG_VAL_IRQ_MASK_ALL);
-	
+
 
 }
 
@@ -1311,7 +1311,7 @@ static void subsystem_maligp_return_job_to_user( mali_core_job * job, mali_subsy
 	MALI_DEBUG_PRINT(5, ("Mali GP: Job: 0x%08x OUTPUT to user. Runtime: %d us, irq readout %x\n",
 			(u32)jobgp->user_input.user_job_ptr,
 			job->render_time_usecs,
-		   	jobgp->irq_status)) ;
+			jobgp->irq_status));
 
 	_mali_osk_memset(job_out, 0 , sizeof(_mali_uk_gp_job_finished_s));
 
@@ -1475,7 +1475,7 @@ _mali_osk_errcode_t maligp_signal_power_up( mali_bool queue_only )
 
 	return( mali_core_subsystem_signal_power_up( &subsystem_maligp, 0, queue_only ) );
 }
-	
+
 _mali_osk_errcode_t maligp_signal_power_down( mali_bool immediate_only )
 {
 	MALI_DEBUG_PRINT(4, ("Mali GP: signal power down core - immediate_only: %d\n", immediate_only ));

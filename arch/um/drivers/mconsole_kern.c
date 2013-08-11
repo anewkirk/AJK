@@ -124,9 +124,13 @@ void mconsole_log(struct mc_request *req)
 #if 0
 void mconsole_proc(struct mc_request *req)
 {
+<<<<<<< HEAD
+	struct vfsmount *mnt = current->nsproxy->pid_ns->proc_mnt;
+=======
 	struct vfsmount *mnt = task_active_pid_ns(current)->proc_mnt;
 	char *buf;
 	int len;
+>>>>>>> 17cf22c... pidns: Use task_active_pid_ns where appropriate
 	struct file *file;
 	int n;
 	char *ptr = req->request.data, *buf;
@@ -706,7 +710,7 @@ static void stack_proc(void *arg)
 	struct task_struct *from = current, *to = arg;
 
 	to->thread.saved_task = from;
-	rcu_user_hooks_switch(from, to);
+	rcu_switch(from, to);
 	switch_to(from, to, from);
 }
 

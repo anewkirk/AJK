@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/cdev.h>
+#include <linux/idr.h>
 #include <linux/fs.h>
 
 #include <net/net_namespace.h>
@@ -550,6 +551,10 @@ static ssize_t macvtap_get_user(struct macvtap_queue *q,
 
 	err = -EINVAL;
 	if (unlikely(len < ETH_HLEN))
+		goto err;
+
+	err = -EMSGSIZE;
+	if (unlikely(count > UIO_MAXIOV))
 		goto err;
 
 	skb = macvtap_alloc_skb(&q->sk, NET_IP_ALIGN, len, vnet_hdr.hdr_len,
