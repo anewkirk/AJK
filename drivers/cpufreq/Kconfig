@@ -269,13 +269,13 @@ config CPU_FREQ_GOV_SLEEPY
 	tristate "'sleepy' cpufreq governor"
 	depends on CPU_FREQ
 	---help---
-          'sleepy' - an "ondemandx" based tweaked, smart and smooth optimized governor!
+          'sleepy' - An "ondemandx" based tweaked, smart and smooth optimized governor!
 
 config CPU_FREQ_GOV_HYPER
         tristate "'HYPER' cpufreq governor"
         depends on CPU_FREQ
         ---help---
-          'HYPER' - a tweaked "ondemand" based smart and smooth optimized governor!
+          'HYPER' - A tweaked "ondemand" based smart and smooth optimized governor!
 
            If in doubt, say Y.
 
